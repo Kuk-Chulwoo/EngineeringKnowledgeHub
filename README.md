@@ -2,7 +2,9 @@
 
 Phase 1 / v0.1: component catalog and immutable datasheet revision management.
 FastAPI + Python, SQLite, React + TypeScript. AI analysis and PADS generation are
-reserved for later phases. Engineering release review is pending; no tag created.
+reserved for later phases. Phase 1 is approved and tagged v0.1.0.
+Phase 2A proposals: [architecture](docs/PHASE2_AI_EXTRACTION.md) and
+[data model](docs/ENGINEERING_DATA_MODEL.md). Implementation awaits architecture review.
 
 ## Windows quick start
 

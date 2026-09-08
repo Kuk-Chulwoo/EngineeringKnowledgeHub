@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.1.0 — unreleased, engineering review pending
+## Unreleased
+
+- Propose Phase 2A extraction architecture and engineering data model; implementation awaits review.
+
+## 0.1.0 — 2026-09-08
 
 - Establish the requested local workspace and GitHub main branch.
 - Document architecture, data model, roadmap and Git workflow before implementation.
@@ -15,4 +19,5 @@
 - Add 16 backend tests (including real-process restart) and 4 interface tests.
 - Keep production datasheets, runtime databases and secrets out of Git.
 
-No release tag: engineering review is required first. Phase 2 has not started.
+Phase 1 approved. Annotated v0.1.0 tag points to 391db8dd874d3a6286e52228a17441a9a85d730d.
+Phase 2A is design-only pending architecture review.
