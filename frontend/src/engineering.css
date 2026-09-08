@@ -1,0 +1,9 @@
+select{font:inherit;padding:.6rem;border:1px solid #aab9c5;border-radius:4px;max-width:100%;background:white;color:#193047}
+.engineering-notice{border-left:3px solid #a3710d;background:#fff8e6;padding:1rem}
+.engineering-entity{margin:1rem 0;border:1px solid #ccd7df;padding:.8rem;border-radius:4px}
+.engineering-entity>summary{font-weight:600;cursor:pointer}
+.engineering-field{border-top:1px solid #ccd7df;padding:1rem 0;margin-top:1rem}
+.engineering-field .actions{margin:.7rem 0;flex-wrap:wrap}
+.engineering-value{font-family:Consolas,monospace;overflow-wrap:anywhere}
+.engineering-field blockquote{margin:.4rem 0 1rem;padding:.5rem .75rem;background:#f3f6f8;overflow-wrap:anywhere}
+.reviewer-login{padding:1rem;background:#f3f6f8;margin:1rem 0}

@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, fileUrl, type Component, type Detail, type Revision, type SearchResult } from './api';
 import { componentTabs } from './modules';
+import EngineeringPanel from './EngineeringPanel';
+import './engineering.css';
 
 const message = (error: unknown) => error instanceof Error ? error.message : 'Unexpected error';
 const time = (value: string) => new Date(value).toLocaleString();
@@ -96,7 +98,7 @@ function ComponentPage({ id }: { id: number }) {
         aria-current={tab === item.id ? 'page' : undefined} onClick={() => setTab(item.id)}>{item.label}</button>)}
     </nav>
     {error && <p className="error" role="alert">{error} <button onClick={() => setRefresh(n => n + 1)}>Retry</button></p>}
-    {tab === 'overview' ? <>
+    {tab === 'engineering' ? <EngineeringPanel detail={detail} /> : tab === 'overview' ? <>
       <dl className="facts">
         <div><dt>Manufacturer</dt><dd>{detail.manufacturer}</dd></div>
         <div><dt>Part Number</dt><dd>{detail.part_number}</dd></div>

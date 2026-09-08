@@ -8,5 +8,6 @@ export const componentTabs = [
   { id: 'hardware', label: 'Hardware Design', enabled: false },
   { id: 'software', label: 'Software', enabled: false },
   { id: 'pcb', label: 'PCB Library', enabled: false },
+  { id: 'engineering', label: 'Engineering / AI Analysis', enabled: true },
   { id: 'documents', label: 'Documents', enabled: true },
 ];
