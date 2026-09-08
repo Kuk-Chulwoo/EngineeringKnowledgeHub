@@ -1,8 +1,9 @@
-"""Single local worker. No external provider or network calls."""
+"""Local worker; external calls require an explicitly authorized queued run and policy."""
 
 import argparse
 import time
 
+from ..ai.config import ProviderPolicy
 from ..config import Settings
 from ..database import Database
 from ..repository import Repository
@@ -22,7 +23,7 @@ def main() -> None:
     hub = HubService(
         Repository(database), LocalStorage(settings.storage_root), settings.max_upload_bytes
     )
-    service = EngineeringService(EngineeringRepository(database), hub)
+    service = EngineeringService(EngineeringRepository(database), hub, ProviderPolicy.from_env())
     while True:
         worked = service.work_once()
         if args.once:

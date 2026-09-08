@@ -127,10 +127,35 @@ class Provenance(StrictModel):
     synthetic: Literal[True] = True
 
 
+class PassProvenance(StrictModel):
+    pass_name: Literal["identity", "package", "pins", "interfaces"]
+    prompt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    response_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    model_version: str | None = Field(max_length=200)
+    selected_pages: list[int]
+    selected_text_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    truncated_pages: list[int]
+
+
+class RealProvenance(StrictModel):
+    pipeline_version: Literal["native-focused/1"] = "native-focused/1"
+    parser_version: str = Field(min_length=1, max_length=100)
+    provider: Literal["openai"] = "openai"
+    model_identifier: str = Field(min_length=1, max_length=200)
+    model_version: str | None = None
+    prompt_version: str = Field(min_length=1, max_length=100)
+    prompt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    extraction_settings: dict
+    external_transmission_authorized: Literal[True]
+    synthetic: Literal[False] = False
+    passes: list[PassProvenance] = Field(default_factory=list, max_length=4)
+
+
 class CandidateSet(StrictModel):
     schema_version: Literal["engineering-extraction/0.1"] = SCHEMA_VERSION
     source_revision_id: int = Field(gt=0)
-    provenance: Provenance
+    provenance: Provenance | RealProvenance
     entities: list[Entity] = Field(min_length=1, max_length=2000)
 
 

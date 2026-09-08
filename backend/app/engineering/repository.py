@@ -211,11 +211,12 @@ class EngineeringRepository:
                 """INSERT INTO extraction_runs
                 (source_revision_id,source_sha256,page_count,schema_version,provider,
                  provenance_json,status,requested_by,created_at,retry_of_run_id)
-                VALUES (?,?,?,'engineering-extraction/0.1','synthetic',?,'QUEUED',?,?,?) RETURNING id""",
+                VALUES (?,?,?,'engineering-extraction/0.1',?,?,'QUEUED',?,?,?) RETURNING id""",
                 (
                     revision_id,
                     source_hash,
                     page_count,
+                    provenance["provider"],
                     canonical(provenance),
                     actor,
                     utc_now(),
@@ -224,10 +225,41 @@ class EngineeringRepository:
             ).fetchone()[0]
             return self._run(c, run_id)
 
+    @staticmethod
+    def _provenance(c, run):
+        value = json.loads(run["provenance_json"])
+        if run["provider"] != "synthetic":
+            records = {
+                r["pass_name"]: json.loads(r["provenance_json"])
+                for r in c.execute("SELECT * FROM provider_passes WHERE run_id=?", (run["id"],))
+            }
+            value["passes"] = [
+                records[p] for p in ("identity", "package", "pins", "interfaces") if p in records
+            ]
+        return value
+
+    def record_pass(self, run_id, token, provenance):
+        from .schema import PassProvenance
+
+        provenance = PassProvenance.model_validate(provenance).model_dump()
+        with self.database.connect() as c:
+            c.execute("BEGIN IMMEDIATE")
+            run = self._run(c, run_id)
+            require(
+                run["status"] == "RUNNING"
+                and run["lease_token"] == token
+                and run["lease_expires_at"] > utc_now(),
+                "Run cannot record pass",
+            )
+            c.execute(
+                "INSERT INTO provider_passes VALUES (?,?,?)",
+                (run_id, provenance["pass_name"], canonical(provenance)),
+            )
+
     def list_runs(self, revision_id: int) -> list[dict]:
         with self.database.connect() as c:
             return [
-                self._public_run(dict(r))
+                self._public_run(dict(r), self._provenance(c, dict(r)))
                 for r in c.execute(
                     "SELECT * FROM extraction_runs WHERE source_revision_id=? ORDER BY id DESC LIMIT 100",
                     (revision_id,),
@@ -235,21 +267,21 @@ class EngineeringRepository:
             ]
 
     @staticmethod
-    def _public_run(run: dict) -> dict:
+    def _public_run(run: dict, provenance: dict | None = None) -> dict:
         return {
             key: value
             for key, value in run.items()
             if key not in ("lease_token", "lease_expires_at", "provenance_json")
         } | {
-            "provenance": json.loads(run["provenance_json"]),
-            "synthetic": True,
+            "provenance": provenance or json.loads(run["provenance_json"]),
+            "synthetic": run["provider"] == "synthetic",
             "pads_eligible": False,
         }
 
     def read_run(self, run_id: int) -> dict:
         with self.database.connect() as c:
             run = self._run(c, run_id)
-            result = self._public_run(run)
+            result = self._public_run(run, self._provenance(c, run))
             result["entities"] = []
             for row in c.execute(
                 "SELECT * FROM engineering_entities WHERE run_id=? ORDER BY id", (run_id,)
@@ -275,7 +307,7 @@ class EngineeringRepository:
                             "review_status": history[-1]["status"],
                             "latest_review_sequence": history[-1]["sequence"],
                             "history": history,
-                            "provenance": json.loads(run["provenance_json"]),
+                            "provenance": self._provenance(c, run),
                         }
                     )
                 result["entities"].append(entity)
@@ -319,7 +351,7 @@ class EngineeringRepository:
         with self.database.connect() as c:
             c.execute(
                 """UPDATE extraction_runs SET status='FAILED',completed_at=?,
-                error_code=?,error_summary='Synthetic extraction failed; original PDF is unchanged'
+                error_code=?,error_summary='Extraction failed; original PDF is unchanged'
                 WHERE id=? AND status='RUNNING' AND lease_token=?""",
                 (utc_now(), code, run_id, token),
             )
@@ -335,7 +367,7 @@ class EngineeringRepository:
                 "Run cannot publish",
             )
             require(
-                data.provenance.model_dump() == json.loads(run["provenance_json"]),
+                data.provenance.model_dump() == self._provenance(c, run),
                 "Provider provenance mismatch",
                 422,
             )
@@ -352,7 +384,7 @@ class EngineeringRepository:
                         run,
                         claim,
                         "AI",
-                        "synthetic-worker",
+                        run["provider"] + "-worker",
                     )
             c.execute(
                 """UPDATE extraction_runs SET status='SUCCEEDED',completed_at=?,
@@ -407,7 +439,7 @@ class EngineeringRepository:
             )
         return CandidateSet(
             source_revision_id=run["source_revision_id"],
-            provenance=json.loads(run["provenance_json"]),
+            provenance=self._provenance(c, run),
             entities=entities,
         )
 
@@ -566,7 +598,7 @@ class EngineeringRepository:
                 "package_id": package_id,
                 "fields": sorted(memberships),
                 "profile": "engineering-review/1",
-                "synthetic": True,
+                "synthetic": run["provider"] == "synthetic",
             }
             snapshot_id = c.execute(
                 """INSERT INTO approved_snapshots
@@ -614,5 +646,5 @@ class EngineeringRepository:
                 result["eligibility"] == "ACTIVE" and current
             )
             result["pads_eligible"] = False
-            result["synthetic"] = True
+            result["synthetic"] = self._run(c, result["run_id"])["provider"] == "synthetic"
             return result

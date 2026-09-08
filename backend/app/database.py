@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .migration_v3 import migrate_v2_to_v3
 from .migrations import execute_statements, migrate_v1_to_v2
 
 SCHEMA = """
@@ -59,14 +60,15 @@ class Database:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2):
+            if version not in (0, 1, 2, 3):
                 raise RuntimeError(f"Unsupported database schema version: {version}")
-            if version == 1:
+            if version in (1, 2):
                 # SQLite backup includes a coherent snapshot; never overwrite an earlier backup.
                 stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
-                backup_path = self.path.with_name(self.path.name + ".v1-backup-" + stamp)
+                backup_path = self.path.with_name(self.path.name + f".v{version}-backup-" + stamp)
                 with sqlite3.connect(backup_path) as backup:
                     connection.backup(backup)
+            connection.execute("PRAGMA foreign_keys = OFF")
             connection.execute("BEGIN IMMEDIATE")
             version = connection.execute("PRAGMA user_version").fetchone()[0]
             if version == 0:
@@ -74,3 +76,8 @@ class Database:
                 version = 1
             if version == 1:
                 migrate_v1_to_v2(connection)
+                version = 2
+            if version == 2:
+                migrate_v2_to_v3(connection)
+            if connection.execute("PRAGMA foreign_key_check").fetchall():
+                raise RuntimeError("Foreign key check failed")

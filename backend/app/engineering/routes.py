@@ -3,6 +3,9 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..ai.config import ExtractionSettings
+from ..ai.golden import GoldenManifest, GoldenService
+from .repository import require
 from .schema import Claim
 from .service import EngineeringService
 from .synthetic import fixture_pdf
@@ -20,7 +23,9 @@ class Login(Input):
 
 
 class RunInput(Input):
-    provider: Literal["synthetic"] = "synthetic"
+    provider: Literal["synthetic", "openai"] = "synthetic"
+    external_transmission_authorized: bool = False
+    settings: ExtractionSettings | None = None
     retry_of_run_id: int | None = Field(default=None, gt=0)
 
 
@@ -94,7 +99,19 @@ def synthetic_file() -> Response:
 
 @router.post("/revisions/{revision_id}/extraction-runs", status_code=201)
 def create_run(revision_id: int, payload: RunInput, actor: Actor, hub: Engineering) -> dict:
-    return hub.create(revision_id, actor, payload.retry_of_run_id)
+    if payload.provider == "synthetic":
+        require(
+            payload.settings is None and not payload.external_transmission_authorized,
+            "Synthetic runs do not accept external settings",
+            422,
+        )
+        return hub.create(revision_id, actor, payload.retry_of_run_id)
+    require(
+        payload.external_transmission_authorized and payload.settings is not None,
+        "Explicit external transmission authorization and package scope required",
+        422,
+    )
+    return hub.create_real(revision_id, actor, payload.settings, payload.retry_of_run_id)
 
 
 @router.get("/revisions/{revision_id}/extraction-runs")
@@ -147,3 +164,48 @@ def snapshot(payload: SnapshotInput, actor: Actor, hub: Engineering) -> dict:
 @router.get("/approved-snapshots/{snapshot_id}")
 def read_snapshot(snapshot_id: int, hub: Engineering) -> dict:
     return hub.repository.read_snapshot(snapshot_id)
+
+
+@router.get("/engineering/provider-config")
+def provider_config(hub: Engineering) -> dict:
+    return hub.policy.public()
+
+
+class GoldenInput(Input):
+    manifest: GoldenManifest
+    manually_curated_from_source: Literal[True]
+
+
+class GoldenApproval(Input):
+    expected_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reviewed_against_original_pdf: Literal[True]
+
+
+@router.get("/engineering/golden-schema")
+def golden_schema() -> dict:
+    return GoldenManifest.model_json_schema()
+
+
+@router.post("/golden-references", status_code=201)
+def create_golden(payload: GoldenInput, actor: Actor, hub: Engineering) -> dict:
+    return GoldenService(hub).create(payload.manifest, actor)
+
+
+@router.get("/revisions/{revision_id}/golden-references")
+def list_golden(revision_id: int, hub: Engineering) -> list[dict]:
+    return GoldenService(hub).list(revision_id)
+
+
+@router.get("/golden-references/{golden_id}")
+def read_golden(golden_id: int, hub: Engineering) -> dict:
+    return GoldenService(hub).read(golden_id)
+
+
+@router.post("/golden-references/{golden_id}/approval")
+def approve_golden(golden_id: int, payload: GoldenApproval, actor: Actor, hub: Engineering) -> dict:
+    return GoldenService(hub).approve(golden_id, payload.expected_sha256, actor)
+
+
+@router.get("/golden-references/{golden_id}/evaluations/{run_id}")
+def evaluate_golden(golden_id: int, run_id: int, hub: Engineering) -> dict:
+    return GoldenService(hub).evaluate(golden_id, run_id)

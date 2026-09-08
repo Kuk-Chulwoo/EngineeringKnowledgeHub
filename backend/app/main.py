@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from .ai.config import ProviderPolicy
 from .config import Settings
 from .database import Database
 from .engineering.auth import LocalReviewer
@@ -69,7 +70,7 @@ def create_app(settings: Settings | None = None, storage: Storage | None = None)
     async def service_error(request: Request, error: ServiceError) -> JSONResponse:
         return JSONResponse(status_code=error.status, content={"detail": error.detail})
 
-    app.state.engineering = EngineeringService(EngineeringRepository(database), app.state.service)
+    app.state.engineering = EngineeringService(EngineeringRepository(database), app.state.service, ProviderPolicy.from_env())
     app.state.reviewer = LocalReviewer(settings.reviewer_file)
     app.include_router(engineering_router)
     app.include_router(router)

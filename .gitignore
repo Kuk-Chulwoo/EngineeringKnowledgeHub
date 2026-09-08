@@ -32,3 +32,4 @@ data/engineering/
 data/cache/
 data/scratch/
 *.v1-backup-*
+*.v2-backup-*

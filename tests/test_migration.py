@@ -36,13 +36,13 @@ def test_populated_v1_migration_preserves_every_original_column(tmp_path):
     Database(path).initialize()
     assert rows(path) == before
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
         assert (
             connection.execute("SELECT count(*) FROM sqlite_master WHERE type='table'").fetchone()[
                 0
             ]
-            == 10
+            == 12
         )
     backups = list(tmp_path.glob("*.v1-backup-*"))
     assert len(backups) == 1
