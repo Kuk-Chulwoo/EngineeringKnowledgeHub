@@ -17,8 +17,21 @@ from ..engineering.schema import (
 from .parsing import normalized
 
 
+class WireEvidence(StrictModel):
+    source_revision_id: int = Field(gt=0)
+    page_number: int = Field(gt=0)
+    printed_page_label: str | None = Field(default=None, max_length=100)
+    source_text: str = Field(min_length=1, max_length=2048)
+    source_text_sha256: None = None
+    region: None = None
+    locator_method: Literal["TEXT", "TABLE"] = "TEXT"
+    locator_version: Literal["native-selection/1"] = "native-selection/1"
+    evidence_role: Literal["DIRECT", "CONTEXT"] = "DIRECT"
+
+
 class WireClaim(Claim):
     value: str | int | bool | Quantity | None = None
+    evidence: list[WireEvidence] = Field(default_factory=list, max_length=16)
 
 
 class WireEntity(Entity):

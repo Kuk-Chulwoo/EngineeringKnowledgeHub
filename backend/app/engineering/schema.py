@@ -131,7 +131,8 @@ class PassProvenance(StrictModel):
     pass_name: Literal["identity", "package", "pins", "interfaces"]
     prompt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    response_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    response_sha256: str | None = Field(pattern=r"^[0-9a-f]{64}$")
+    error_code: str | None = Field(default=None, max_length=100)
     model_version: str | None = Field(max_length=200)
     selected_pages: list[int]
     selected_text_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")

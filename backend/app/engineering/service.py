@@ -6,7 +6,8 @@ from pypdf import PdfReader
 from ..ai.config import ProviderPolicy
 from ..ai.extraction import extract, provenance
 from ..ai.parsing import analyze
-from ..ai.providers.openai_provider import OpenAIProvider, ProviderFailure
+from ..ai.providers.base import ProviderFailure
+from ..ai.providers.openai_provider import OpenAIProvider
 from ..services import HubService, ServiceError
 from .repository import EngineeringRepository, require
 from .schema import CandidateSet

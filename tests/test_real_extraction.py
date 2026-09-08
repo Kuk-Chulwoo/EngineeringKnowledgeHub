@@ -11,12 +11,6 @@ import httpx
 import pytest
 import test_engineering_workflows as workflows
 from pypdf import PdfReader
-
-client = workflows.client
-settings = workflows.settings
-fields = workflows.fields
-review = workflows.review
-source = workflows.source
 from test_migration import populated_v1
 
 from backend.app.ai.config import ExtractionSettings, ProviderPolicy
@@ -29,6 +23,12 @@ from backend.app.engineering.repository import EngineeringRepository
 from backend.app.engineering.schema import canonical
 from backend.app.engineering.synthetic import PROVENANCE, candidates, fixture_pdf
 from backend.app.migrations import migrate_v1_to_v2
+
+client = workflows.client
+settings = workflows.settings
+fields = workflows.fields
+review = workflows.review
+source = workflows.source
 
 SCOPE = "FAB-PKG-A"
 MODEL = "mock-structured-model"
@@ -50,6 +50,11 @@ def pass_payload(revision, pass_name):
     entities = [e for e in data["entities"] if e["kind"] in PASS_KINDS[pass_name]]
     for e in entities:
         e["fields"] = [f for f in e["fields"] if not f["key"].startswith("alternate_function.")]
+    for entity in entities:
+        for claim in entity["fields"]:
+            for evidence in claim["evidence"]:
+                evidence["source_text_sha256"] = None
+                evidence["locator_version"] = "native-selection/1"
     return {
         "schema_version": data["schema_version"],
         "source_revision_id": revision,
@@ -235,6 +240,10 @@ def test_provider_failures_are_redacted_and_retry_is_explicit(client, mode, code
     failed = service.repository.read_run(run["id"])
     assert failed["status"] == "FAILED" and failed["error_code"] == code
     assert "sensitive" not in canonical(failed) and len(calls) == 1
+    assert failed["provenance"]["passes"][0]["error_code"] == code
+    assert len(failed["provenance"]["passes"][0]["request_sha256"]) == 64
+    if mode in ("timeout", "http", "huge"):
+        assert failed["provenance"]["passes"][0]["response_sha256"] is None
     service, calls = configure(client)
     retry = start(client, revision, run["id"])
     service.work_once()
@@ -296,6 +305,7 @@ def test_selection_and_parser_bounds(client):
     )
     selected = doc.select("pins", settings)
     assert 12 in selected and len(selected) <= 2 and sum(map(len, selected.values())) <= 1500
+    assert all(len(text) <= 1000 for text in selected.values())
     revision = source(client)
     actual = analyze(client.app.state.engineering.hub, revision, settings)
     assert all(len(text) <= 1000 for text in actual.pages.values())

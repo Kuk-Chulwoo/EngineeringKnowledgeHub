@@ -14,3 +14,11 @@ class CandidateProvider(Protocol):
     def generate(
         self, model: str, prompt: str, content: dict, schema: dict, max_output_tokens: int
     ) -> ProviderResult: ...
+
+
+class ProviderFailure(Exception):
+    def __init__(self, code):
+        self.code = code
+        self.request_sha256 = None
+        self.response_sha256 = None
+        super().__init__(code)

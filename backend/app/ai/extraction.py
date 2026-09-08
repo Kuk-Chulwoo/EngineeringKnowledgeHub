@@ -5,6 +5,7 @@ from ..engineering.schema import CandidateSet, RealProvenance, digest
 from .config import ExtractionSettings
 from .parsing import PARSER_VERSION, analyze
 from .prompts import PROMPT_VERSION, prompt, prompt_hash
+from .providers.base import ProviderFailure
 from .wire import PASS_KINDS, parse_output, wire_schema
 
 
@@ -65,23 +66,40 @@ def extract(service, run, provider):
             "physical_pages": {str(k): v for k, v in selected.items()},
             "reference_entities": context,
         }
-        result = provider.generate(
-            frozen["model_identifier"],
-            prompt(pass_name),
-            content,
-            wire_schema(pass_name),
-            settings.max_output_tokens,
-        )
         record = {
             "pass_name": pass_name,
             "prompt_sha256": digest(prompt(pass_name)),
-            "request_sha256": result.request_sha256,
-            "response_sha256": result.response_sha256,
-            "model_version": result.model_version,
             "selected_pages": list(selected),
             "selected_text_sha256": digest({str(k): v for k, v in selected.items()}),
             "truncated_pages": document.truncated_pages,
         }
+        try:
+            result = provider.generate(
+                frozen["model_identifier"],
+                prompt(pass_name),
+                content,
+                wire_schema(pass_name),
+                settings.max_output_tokens,
+            )
+        except ProviderFailure as error:
+            if error.request_sha256:
+                service.repository.record_pass(
+                    run["id"],
+                    run["lease_token"],
+                    {
+                        **record,
+                        "request_sha256": error.request_sha256,
+                        "response_sha256": error.response_sha256,
+                        "model_version": None,
+                        "error_code": error.code,
+                    },
+                )
+            raise
+        record.update(
+            request_sha256=result.request_sha256,
+            response_sha256=result.response_sha256,
+            model_version=result.model_version,
+        )
         # Persist metadata even if subsequent local candidate validation fails; never raw responses.
         service.repository.record_pass(run["id"], run["lease_token"], record)
         entities.extend(

@@ -6,13 +6,7 @@ import json
 import httpx
 
 from ...engineering.schema import canonical, digest
-from .base import ProviderResult
-
-
-class ProviderFailure(Exception):
-    def __init__(self, code):
-        self.code = code
-        super().__init__(code)
+from .base import ProviderFailure, ProviderResult
 
 
 class OpenAIProvider:
@@ -38,6 +32,14 @@ class OpenAIProvider:
                 }
             },
         }
+        raw = None
+
+        def failure(code):
+            error = ProviderFailure(code)
+            error.request_sha256 = digest(request)
+            error.response_sha256 = hashlib.sha256(raw).hexdigest() if raw is not None else None
+            return error
+
         try:
             with (
                 httpx.Client(
@@ -58,10 +60,11 @@ class OpenAIProvider:
                 for chunk in response.iter_bytes():
                     raw.extend(chunk)
                     if len(raw) > 2_000_000:
-                        raise ProviderFailure("PROVIDER_RESPONSE_TOO_LARGE")
+                        raw = None  # A prefix is not a hash of the complete response.
+                        raise failure("PROVIDER_RESPONSE_TOO_LARGE")
             result = json.loads(raw)
             if result.get("status") != "completed":
-                raise ProviderFailure("PROVIDER_INCOMPLETE")
+                raise failure("PROVIDER_INCOMPLETE")
             messages = [
                 c
                 for item in result.get("output", [])
@@ -69,16 +72,18 @@ class OpenAIProvider:
                 for c in item.get("content", [])
             ]
             if len(messages) != 1 or messages[0].get("type") != "output_text":
-                raise ProviderFailure("PROVIDER_REFUSAL_OR_MALFORMED")
+                raise failure("PROVIDER_REFUSAL_OR_MALFORMED")
             payload = json.loads(messages[0]["text"])
             if not isinstance(payload, dict):
-                raise ProviderFailure("PROVIDER_MALFORMED")
+                raise failure("PROVIDER_MALFORMED")
             return ProviderResult(
                 payload, digest(request), hashlib.sha256(raw).hexdigest(), result.get("model")
             )
         except httpx.TimeoutException as error:
-            raise ProviderFailure("PROVIDER_TIMEOUT") from error
+            raw = None
+            raise failure("PROVIDER_TIMEOUT") from error
         except httpx.HTTPError as error:
-            raise ProviderFailure("PROVIDER_HTTP_FAILURE") from error
+            raw = None
+            raise failure("PROVIDER_HTTP_FAILURE") from error
         except (ValueError, KeyError, TypeError, AttributeError) as error:
-            raise ProviderFailure("PROVIDER_MALFORMED") from error
+            raise failure("PROVIDER_MALFORMED") from error

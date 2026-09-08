@@ -55,7 +55,7 @@ class DocumentText:
         for n in ranked[: settings.pages_per_pass]:
             if remaining <= 0:
                 break
-            selected[n] = self.pages[n][:remaining]
+            selected[n] = self.pages[n][: min(remaining, settings.chars_per_page)]
             remaining -= len(selected[n])
         require(bool(selected), "No native text available; OCR is not implemented", 422)
         return dict(sorted(selected.items()))
