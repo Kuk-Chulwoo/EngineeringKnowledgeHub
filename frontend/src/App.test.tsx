@@ -1,0 +1,83 @@
+import { afterEach, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import App from './App';
+
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+const component = { id: 1, manufacturer: 'Acme', part_number: 'REF123', description: 'Reference',
+  category: 'Analog', package: 'SOIC-8', created_at: '2026-09-08T00:00:00Z' };
+const revision = { id: 3, revision: 'A', filename: 'reference.pdf', datasheet_date: '2026-09-01',
+  uploaded_at: '2026-09-08T00:00:00Z', size_bytes: 2048, sha256: 'abc' };
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+
+it('registers a component and opens the saved overview', async () => {
+  const user = userEvent.setup();
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === 'POST') return json(component, 201);
+    if (url === '/api/v1/components/1') return json({ ...component, documents: [] });
+    return json({ items: [], total: 0, limit: 20, offset: 0 });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<App />);
+  await user.click(screen.getByRole('button', { name: '+ Register component' }));
+  await user.type(screen.getByLabelText('Manufacturer', { exact: true }), 'Acme');
+  await user.type(screen.getByLabelText('Manufacturer Part Number'), 'REF123');
+  await user.click(screen.getByRole('button', { name: 'Save component' }));
+  await screen.findByRole('heading', { name: 'REF123' });
+  const call = fetcher.mock.calls.find(([, init]) => init?.method === 'POST')!;
+  expect(JSON.parse(call[1]!.body as string).part_number).toBe('REF123');
+  expect(screen.getByRole('button', { name: 'PCB Library' }).hasAttribute('disabled')).toBe(true);
+});
+
+it('uploads a PDF, refreshes revision history, and exposes view/download', async () => {
+  const user = userEvent.setup();
+  let uploaded = false;
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === 'POST') { uploaded = true; return json(revision, 201); }
+    if (url === '/api/v1/components/1') return json({ ...component,
+      documents: uploaded ? [{ id: 2, title: 'Datasheet', revisions: [revision] }] : [] });
+    return json({ items: [component], total: 1, limit: 20, offset: 0 });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<App />);
+  await user.click(await screen.findByRole('button', { name: /Acme REF123/ }));
+  await user.click(await screen.findByRole('button', { name: 'Manage documents' }));
+  await user.type(screen.getByLabelText('Revision', { exact: true }), 'A');
+  await user.upload(screen.getByLabelText('PDF file'), new File(['%PDF-test'], 'reference.pdf', { type: 'application/pdf' }));
+  // jsdom does not connect user-event's FileList to native required-file validity.
+  // Submit the form handler explicitly; real PDF transport is covered by backend tests.
+  fireEvent.submit(screen.getByRole('button', { name: 'Upload PDF' }).closest('form')!);
+  await screen.findByText('PDF stored. Previous revisions are preserved.');
+  await user.click(await screen.findByRole('button', { name: 'View Datasheet A' }));
+  expect(screen.getByTitle('PDF: reference.pdf').getAttribute('src')).toBe('/api/v1/revisions/3/file');
+  expect(screen.getByRole('link', { name: 'Download' }).getAttribute('href'))
+    .toBe('/api/v1/revisions/3/file?download=true');
+  const data = fetcher.mock.calls.find(([, init]) => init?.method === 'POST')![1]!.body as FormData;
+  expect(data.get('revision')).toBe('A');
+  expect(data.has('datasheet_date')).toBe(false);
+});
+
+it('shows server errors without claiming registration succeeded', async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) =>
+    init?.method === 'POST' ? json({ detail: 'Component already exists' }, 409) :
+      json({ items: [], total: 0, limit: 20, offset: 0 })));
+  render(<App />);
+  await user.click(screen.getByRole('button', { name: '+ Register component' }));
+  await user.type(screen.getByLabelText('Manufacturer', { exact: true }), 'Acme');
+  await user.type(screen.getByLabelText('Manufacturer Part Number'), 'REF123');
+  await user.click(screen.getByRole('button', { name: 'Save component' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('Component already exists');
+  expect(screen.getByRole('button', { name: 'Save component' }).hasAttribute('disabled')).toBe(false);
+});
+
+it('sends the current search term to the catalog endpoint', async () => {
+  const user = userEvent.setup();
+  const fetcher = vi.fn(async () => json({ items: [], total: 0, limit: 20, offset: 0 }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<App />);
+  await user.type(screen.getByRole('searchbox'), 'voltage');
+  await waitFor(() => expect(fetcher).toHaveBeenCalledWith(
+    '/api/v1/components?q=voltage&limit=20&offset=0', expect.any(Object)));
+  await screen.findByText('No matching components');
+});
