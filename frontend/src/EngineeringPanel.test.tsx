@@ -104,3 +104,29 @@ it('does not turn a stale rejected review request into an approval', async () =>
   expect((await screen.findByRole('alert')).textContent).toBe('Stale review sequence');
   expect(screen.getByText('AI_EXTRACTED', { selector: '.badge' })).toBeTruthy();
 });
+
+
+it('gates real AI extraction on configured provider, package scope and explicit transmission consent', async () => {
+  const user = userEvent.setup();
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/reviewer/session')) return json({ actor: 'Engineer', csrf_token: 'csrf' });
+    if (url.endsWith('/provider-config')) return json({ provider: 'openai', model: 'mock-model', enabled: true, configured: true });
+    if (url.endsWith('/extraction-runs') && init?.method === 'POST') return json({ ...completed(), status: 'QUEUED', entities: [] });
+    if (url.endsWith('/extraction-runs')) return json([]);
+    if (url.endsWith('/extraction-runs/3')) return json(completed());
+    if (url.endsWith('/golden-references')) return json([]);
+    throw new Error(url);
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<EngineeringPanel detail={detail} />);
+  await screen.findByText('Engineer', { exact: true });
+  await user.selectOptions(screen.getByLabelText('Source document revision'), '7');
+  await user.selectOptions(screen.getByLabelText('Extraction mode'), 'openai');
+  expect(screen.getByRole('button', { name: 'Start Real AI Extraction' }).hasAttribute('disabled')).toBe(true);
+  await user.type(screen.getByLabelText('Package scope'), 'Reviewed package scope');
+  await user.click(screen.getByLabelText(/I authorize sending/));
+  await user.click(screen.getByRole('button', { name: 'Start Real AI Extraction' }));
+  const post = fetcher.mock.calls.find(([url, init]) => url.endsWith('/extraction-runs') && init?.method === 'POST')!;
+  expect(JSON.parse(post[1]!.body as string)).toEqual({ provider: 'openai', retry_of_run_id: null,
+    external_transmission_authorized: true, settings: { package_scope: 'Reviewed package scope' } });
+});
