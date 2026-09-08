@@ -1,6 +1,6 @@
 # Phase 2A: AI-assisted datasheet knowledge extraction
 
-Status: PROPOSED — architecture review required before implementation.
+Status: APPROVED with engineering-data foundation refinements; external AI integration deferred.
 Baseline: v0.1.0, approved commit 391db8dd874d3a6286e52228a17441a9a85d730d.
 The annotated release tag was pushed before preparing this proposal.
 This document specifies future behavior; no engine, API, tables or migration exist yet.
@@ -235,3 +235,27 @@ Future scope: electrical characteristics, recommended operating conditions, abso
 maximum ratings, register maps, initialization sequences, hardware recommendations,
 detailed mechanical dimensions and recommended PCB land patterns. Keep each concept
 separate with units, conditions and source evidence; do not implement them in 2A now.
+
+
+## Approved foundation refinements
+
+- Package identity includes manufacturer_package_code separately from family/type,
+  lead_count and pin_count_basis. Family plus count is never a unique package identity.
+  All dimensions, pitch and exposed-pad presence retain independent evidence.
+- Pin fields are source_name (verbatim), normalized_name, primary_function,
+  alternate_functions, electrical_type and functional_group. Normalization does not
+  overwrite source_name. Each alternate function is represented as a separate claim
+  (alternate_function.<stable-key>) so its evidence/review is independent.
+  Multiplexed pins can have multiple interface-pin membership entities.
+- Future lineage: component/orderable variant -> package -> mechanical drawing ->
+  manufacturer-recommended land pattern -> PADS PCB decal. Mechanical dimensions and
+  land-pattern geometry are separate concepts. A package alone cannot justify a footprint.
+  No drawing/land-pattern geometry or PADS generation is implemented in this foundation.
+- This implementation uses only a provider-independent fabricated fixture. Synthetic
+  results are explicitly marked and accepted only for the matching fixture PDF hash;
+  arbitrary production PDFs must not be assigned fabricated engineering values.
+- Minimal reviewer setup uses a locally configured account with a salted password hash,
+  in-memory expiring sessions, HttpOnly SameSite cookies and CSRF tokens. No RBAC/SSO.
+- One explicit worker command processes durable queued runs. The UI can start runs;
+  worker failure/expired leases result in FAILED and retry creates a new run. No external
+  provider, model download, OCR integration or CC1120 fixture is included.

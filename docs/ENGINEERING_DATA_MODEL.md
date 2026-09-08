@@ -1,7 +1,7 @@
 # Proposed engineering data model — Phase 2A
 
-Status: PROPOSED, pending architecture review. No SQL migrations or application schemas
-are implemented by this change. Companion: [Phase 2A architecture](PHASE2_AI_EXTRACTION.md).
+Status: APPROVED for engineering-data foundation implementation. External AI, CC1120
+golden extraction and PADS generation remain outside this phase. Companion: [Phase 2A architecture](PHASE2_AI_EXTRACTION.md).
 
 ## Design invariants
 
@@ -66,8 +66,8 @@ extraction confidence. Human approval is a separate decision, never confidence=1
 | Entity | Field keys and value rules |
 |---|---|
 | component_identity | manufacturer, part_number, description: strings; preserve source identity, do not overwrite catalog |
-| package | family, type: strings; pin_count: positive integer; pin_count_basis: LEADS_ONLY/INCLUDING_EXPOSED_PAD/UNSPECIFIED; body_length/body_width/body_height/pitch bounds: dimensional fields; exposed_pad_present: boolean |
-| pin | number: string (supports numeric pins, alphanumeric pads and vendor EP designators); name: source string; electrical_type: enum; function: string; functional_group: optional string; package_ref: local package entity reference |
+| package | family, type, manufacturer_package_code: strings; lead_count: positive integer; pin_count_basis: LEADS_ONLY/INCLUDING_EXPOSED_PAD/UNSPECIFIED; body_length/body_width/body_height/pitch bounds: dimensional fields; exposed_pad_present: boolean |
+| pin | number: string (supports numeric pins, alphanumeric pads and vendor EP designators); source_name: verbatim string; normalized_name: optional string; electrical_type: enum; primary_function: string; alternate_function.<key>: optional string; functional_group: optional string; package_ref: local package entity reference |
 | interface | kind: enum; name: source/normalized label; function: optional description; package_ref: package reference where relevant |
 | interface_pin | interface_ref, pin_ref: local entity references; role: string such as clock/data/chip-select/supply; each evidenced |
 
@@ -358,3 +358,27 @@ confidential; Git export is a deliberate reviewed operation.
 Add a reviewed schema version and validators when each domain is authorized. Existing
 field envelopes, evidence and approval lineage can be reused. No speculative values,
 register tables, geometry or PADS data are created by this proposal.
+
+
+## Approved foundation refinements
+
+- Package identity includes manufacturer_package_code separately from family/type,
+  lead_count and pin_count_basis. Family plus count is never a unique package identity.
+  All dimensions, pitch and exposed-pad presence retain independent evidence.
+- Pin fields are source_name (verbatim), normalized_name, primary_function,
+  alternate_functions, electrical_type and functional_group. Normalization does not
+  overwrite source_name. Each alternate function is represented as a separate claim
+  (alternate_function.<stable-key>) so its evidence/review is independent.
+  Multiplexed pins can have multiple interface-pin membership entities.
+- Future lineage: component/orderable variant -> package -> mechanical drawing ->
+  manufacturer-recommended land pattern -> PADS PCB decal. Mechanical dimensions and
+  land-pattern geometry are separate concepts. A package alone cannot justify a footprint.
+  No drawing/land-pattern geometry or PADS generation is implemented in this foundation.
+- This implementation uses only a provider-independent fabricated fixture. Synthetic
+  results are explicitly marked and accepted only for the matching fixture PDF hash;
+  arbitrary production PDFs must not be assigned fabricated engineering values.
+- Minimal reviewer setup uses a locally configured account with a salted password hash,
+  in-memory expiring sessions, HttpOnly SameSite cookies and CSRF tokens. No RBAC/SSO.
+- One explicit worker command processes durable queued runs. The UI can start runs;
+  worker failure/expired leases result in FAILED and retry creates a new run. No external
+  provider, model download, OCR integration or CC1120 fixture is included.
