@@ -25,3 +25,10 @@ Thumbs.db
 coverage/
 htmlcov/
 .coverage
+
+# Local reviewer credentials and derived runtime engineering data
+data/reviewer.json
+data/engineering/
+data/cache/
+data/scratch/
+*.v1-backup-*

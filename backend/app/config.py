@@ -10,6 +10,7 @@ class Settings:
     database_path: Path
     storage_root: Path
     max_upload_bytes: int = 50 * 1024 * 1024
+    reviewer_file: Path | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -24,4 +25,5 @@ class Settings:
             resolve("EKH_DATABASE_PATH", "data/hub.sqlite3"),
             resolve("EKH_STORAGE_ROOT", "data/datasheets"),
             limit * 1024 * 1024,
+            resolve("EKH_REVIEWER_FILE", "data/reviewer.json"),
         )

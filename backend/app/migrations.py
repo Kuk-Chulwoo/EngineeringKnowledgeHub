@@ -95,6 +95,9 @@ WHEN (NEW.origin='AI' AND
  OR (NEW.origin='ENGINEER_CORRECTION' AND
  (SELECT status FROM extraction_runs WHERE id=NEW.run_id)<>'SUCCEEDED')
 BEGIN SELECT RAISE(ABORT,'Invalid field publication state'); END;
+CREATE TRIGGER frozen_evidence_insert BEFORE INSERT ON engineering_field_evidence
+WHEN EXISTS(SELECT 1 FROM engineering_review_events WHERE field_id=NEW.field_id)
+BEGIN SELECT RAISE(ABORT,'Published field evidence is immutable'); END;
 CREATE TRIGGER sealed_membership BEFORE INSERT ON approved_snapshot_fields
 WHEN (SELECT sealed FROM approved_snapshots WHERE id=NEW.snapshot_id)=1
 BEGIN SELECT RAISE(ABORT,'Snapshot manifest is immutable'); END;

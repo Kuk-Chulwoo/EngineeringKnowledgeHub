@@ -52,6 +52,7 @@ class Evidence(StrictModel):
     page_number: int = Field(gt=0)
     printed_page_label: str | None = Field(default=None, max_length=100)
     source_text: str | None = Field(default=None, min_length=1, max_length=2048)
+    source_text_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     region: Region | None = None
     locator_method: Literal["TEXT", "TABLE", "OCR", "VISION"] = "TEXT"
     locator_version: str = Field(min_length=1, max_length=100)
@@ -61,6 +62,13 @@ class Evidence(StrictModel):
     def supported(self) -> "Evidence":
         if not (self.source_text and self.source_text.strip()) and self.region is None:
             raise ValueError("Evidence requires text or region")
+        if self.source_text:
+            expected = hashlib.sha256(self.source_text.encode()).hexdigest()
+            if self.source_text_sha256 is not None and self.source_text_sha256 != expected:
+                raise ValueError("Source text hash mismatch")
+            self.source_text_sha256 = expected
+        elif self.source_text_sha256 is not None:
+            raise ValueError("Source text hash requires text")
         return self
 
 
