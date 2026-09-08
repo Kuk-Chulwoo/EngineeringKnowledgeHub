@@ -34,3 +34,8 @@ No modification/deletion endpoints exist for historical revisions.
 See [Phase 2A foundation API table](PHASE2A_FOUNDATION.md#apis) for extraction,
 local reviewer/session, correction and snapshot endpoints. Phase 1 routes above retain
 their existing contract.
+
+
+## Phase 2B additions
+
+See [Phase 2B API table and request shapes](PHASE2B_REAL_EXTRACTION.md#schema-migration-and-apis) for real extraction, provider configuration, golden curation/approval and read-only evaluation. Existing Phase 1/2A routes remain available.

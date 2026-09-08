@@ -1,12 +1,15 @@
 # Engineering Knowledge Hub
 
 Phase 1 / v0.1: component catalog and immutable datasheet revision management.
-FastAPI + Python, SQLite, React + TypeScript. AI analysis and PADS generation are
-reserved for later phases. Phase 1 is approved and tagged v0.1.0.
+FastAPI + Python, SQLite, React + TypeScript. The Phase 1 release reserved AI analysis
+and PADS generation for later phases. Phase 1 is approved and tagged v0.1.0.
 Phase 2A architecture: [architecture](docs/PHASE2_AI_EXTRACTION.md) and
 [data model](docs/ENGINEERING_DATA_MODEL.md). The synthetic engineering-data foundation
-is implemented for review. See [setup, APIs and validation](docs/PHASE2A_FOUNDATION.md).
-External AI, CC1120 extraction and PADS generation are not implemented.
+is approved. See [setup, APIs and validation](docs/PHASE2A_FOUNDATION.md).
+Phase 2B adds opt-in real AI extraction and manually curated golden evaluation.
+See [Phase 2B architecture and exact CC1120 manual steps](docs/PHASE2B_REAL_EXTRACTION.md).
+External transmission is disabled by default. No real CC1120 accuracy result is claimed.
+PADS and footprint generation remain unimplemented.
 
 ## Windows quick start
 
@@ -74,7 +77,7 @@ Never commit production datasheets, credentials or access tokens.
 
 v0.1 is for local single-user use and binds to loopback. Network deployment,
 authentication, advanced PDF sanitization and production operations are future work.
-There is no AI or PADS generation in this version.
+Phase 2B real AI extraction is opt-in; PADS generation remains unavailable.
 
 ## Verification
 
@@ -92,7 +95,8 @@ See docs/VALIDATION.md for acceptance results and remaining review items.
 - frontend/src/: component browser, overview/documents panels and future tab registry.
 - tests/: backend API, persistence, conflict and failure-path tests.
 - data/datasheets/: ignored original PDFs; data/components/: future reviewed exports.
-- ai/, pads/: placeholders only.
+- backend/app/ai/: native PDF parsing, provider adapters, focused extraction and golden comparison.
+- ai/, pads/: original top-level placeholders; PADS generation remains deferred.
 - scripts/: Windows bootstrap, startup and verification.
 - docs/: architecture, model, roadmap, Git workflow and API reference.
 

@@ -28,3 +28,13 @@
 
 Phase 1 approved. Annotated v0.1.0 tag points to 391db8dd874d3a6286e52228a17441a9a85d730d.
 Phase 2A foundation is implemented in Unreleased; external AI and PADS remain deferred.
+
+
+## Phase 2B — engineering review pending
+
+- Opt-in OpenAI Responses adapter with four focused strict-schema passes.
+- Bounded native PDF page selection, verified physical-page quotations and immutable pass provenance.
+- SQLite v3 migration preserves Phase 1/2A rows and audit guards; adds pass provenance and manual golden references.
+- Independent golden curation and exact-hash approval, category/coverage/error comparison against original AI fields.
+- Real extraction and golden review/evaluation UI, mocked regression tests and manual CC1120 instructions.
+- No real CC1120 result, PADS, PCB footprint, electrical or register extraction.

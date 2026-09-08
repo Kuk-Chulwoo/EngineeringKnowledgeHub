@@ -1,5 +1,8 @@
 # Proposed engineering data model — Phase 2A
 
+> Phase 2B implementation update: [real extraction, v3 additions and golden comparison](PHASE2B_REAL_EXTRACTION.md).
+> The Phase 2A design below remains the trust-model baseline. External transmission is now opt-in; PADS remains deferred.
+
 Status: APPROVED for engineering-data foundation implementation. External AI, CC1120
 golden extraction and PADS generation remain outside this phase. Companion: [Phase 2A architecture](PHASE2_AI_EXTRACTION.md).
 

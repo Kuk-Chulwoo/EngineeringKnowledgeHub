@@ -1,5 +1,8 @@
 # Phase 2A: AI-assisted datasheet knowledge extraction
 
+> Phase 2B implementation update: [real extraction, v3 additions and golden comparison](PHASE2B_REAL_EXTRACTION.md).
+> The Phase 2A design below remains the trust-model baseline. External transmission is now opt-in; PADS remains deferred.
+
 Status: APPROVED with engineering-data foundation refinements; external AI integration deferred.
 Baseline: v0.1.0, approved commit 391db8dd874d3a6286e52228a17441a9a85d730d.
 The annotated release tag was pushed before preparing this proposal.
