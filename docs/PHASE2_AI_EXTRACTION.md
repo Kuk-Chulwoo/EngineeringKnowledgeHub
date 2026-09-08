@@ -3,7 +3,8 @@
 Status: APPROVED with engineering-data foundation refinements; external AI integration deferred.
 Baseline: v0.1.0, approved commit 391db8dd874d3a6286e52228a17441a9a85d730d.
 The annotated release tag was pushed before preparing this proposal.
-This document specifies future behavior; no engine, API, tables or migration exist yet.
+This document records the approved architecture. The implemented synthetic foundation
+and deferred provider-specific details are described in [the implementation guide](PHASE2A_FOUNDATION.md).
 
 ## Objective and boundary
 
@@ -259,3 +260,11 @@ separate with units, conditions and source evidence; do not implement them in 2A
 - One explicit worker command processes durable queued runs. The UI can start runs;
   worker failure/expired leases result in FAILED and retry creates a new run. No external
   provider, model download, OCR integration or CC1120 fixture is included.
+
+
+## Foundation implementation record
+
+The approved synthetic engineering-data subset is now implemented. See
+[PHASE2A_FOUNDATION.md](PHASE2A_FOUNDATION.md) for actual table/field mappings, APIs,
+reviewer setup, migration/rollback, snapshot limits and validation results. Sections
+above describing external providers, OCR or broader profiles remain future architecture.

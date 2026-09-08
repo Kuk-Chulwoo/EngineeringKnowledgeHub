@@ -27,3 +27,10 @@ searched literally. Future full-text/Unicode search can replace repository searc
 413 size limit; 422 invalid metadata/PDF. JSON errors use detail.
 Complete request bodies are capped at file limit + 1 MiB multipart overhead.
 No modification/deletion endpoints exist for historical revisions.
+
+
+## Phase 2A additions
+
+See [Phase 2A foundation API table](PHASE2A_FOUNDATION.md#apis) for extraction,
+local reviewer/session, correction and snapshot endpoints. Phase 1 routes above retain
+their existing contract.

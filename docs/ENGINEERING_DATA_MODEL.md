@@ -382,3 +382,11 @@ register tables, geometry or PADS data are created by this proposal.
 - One explicit worker command processes durable queued runs. The UI can start runs;
   worker failure/expired leases result in FAILED and retry creates a new run. No external
   provider, model download, OCR integration or CC1120 fixture is included.
+
+
+## Foundation implementation record
+
+The approved synthetic engineering-data subset is now implemented. See
+[PHASE2A_FOUNDATION.md](PHASE2A_FOUNDATION.md) for actual table/field mappings, APIs,
+reviewer setup, migration/rollback, snapshot limits and validation results. Sections
+above describing external providers, OCR or broader profiles remain future architecture.

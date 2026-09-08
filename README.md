@@ -3,8 +3,10 @@
 Phase 1 / v0.1: component catalog and immutable datasheet revision management.
 FastAPI + Python, SQLite, React + TypeScript. AI analysis and PADS generation are
 reserved for later phases. Phase 1 is approved and tagged v0.1.0.
-Phase 2A proposals: [architecture](docs/PHASE2_AI_EXTRACTION.md) and
-[data model](docs/ENGINEERING_DATA_MODEL.md). Implementation awaits architecture review.
+Phase 2A architecture: [architecture](docs/PHASE2_AI_EXTRACTION.md) and
+[data model](docs/ENGINEERING_DATA_MODEL.md). The synthetic engineering-data foundation
+is implemented for review. See [setup, APIs and validation](docs/PHASE2A_FOUNDATION.md).
+External AI, CC1120 extraction and PADS generation are not implemented.
 
 ## Windows quick start
 
@@ -96,3 +98,16 @@ See docs/VALIDATION.md for acceptance results and remaining review items.
 
 Technical references: [FastAPI uploads](https://fastapi.tiangolo.com/tutorial/request-files/)
 and [Vite guide](https://vite.dev/guide/).
+
+
+## Phase 2A quick start
+
+Configure a local reviewer with scripts/setup-reviewer.ps1, then run the backend,
+frontend and scripts/start-worker.ps1 in separate terminals. Use the documented
+PowerShell -ExecutionPolicy Bypass -File invocation from the startup examples above.
+The new Engineering / AI Analysis tab provides a fabricated fixture PDF to download,
+upload and select for synthetic extraction. No external AI provider is connected.
+
+The first v2 startup creates an automatic SQLite v1 backup and applies an additive
+migration. Stop the old backend before upgrading; v0.1 cannot open a v2 database.
+Review [the complete foundation guide](docs/PHASE2A_FOUNDATION.md) before upgrading.
