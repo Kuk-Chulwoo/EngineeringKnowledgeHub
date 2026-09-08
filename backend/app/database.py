@@ -1,7 +1,10 @@
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
+
+from .migrations import execute_statements, migrate_v1_to_v2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS components (
@@ -56,6 +59,18 @@ class Database:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1):
+            if version not in (0, 1, 2):
                 raise RuntimeError(f"Unsupported database schema version: {version}")
-            connection.executescript(SCHEMA)
+            if version == 1:
+                # SQLite backup includes a coherent snapshot; never overwrite an earlier backup.
+                stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
+                backup_path = self.path.with_name(self.path.name + ".v1-backup-" + stamp)
+                with sqlite3.connect(backup_path) as backup:
+                    connection.backup(backup)
+            connection.execute("BEGIN IMMEDIATE")
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+            if version == 0:
+                execute_statements(connection, SCHEMA)
+                version = 1
+            if version == 1:
+                migrate_v1_to_v2(connection)
