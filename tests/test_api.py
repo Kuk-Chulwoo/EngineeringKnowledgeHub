@@ -78,6 +78,98 @@ def test_register_search_and_validation(client):
     assert client.get("/api/v1/components/999").status_code == 404
 
 
+def test_company_part_metadata_search_and_uniqueness(client):
+    component_id = register(client)
+    created = client.post("/api/v1/components", json={
+        "manufacturer": "Other", "part_number": "P-2", "internal_part_number": "NEW-002"
+    })
+    assert created.status_code == 201
+    assert created.json()["lifecycle_status"] == "DRAFT"
+    assert created.json()["created_at"] == created.json()["updated_at"]
+    response = client.patch(
+        f"/api/v1/components/{component_id}",
+        json={"internal_part_number": "INT-001", "package": "QFN-32"},
+    )
+    assert response.status_code == 200
+    assert response.json()["internal_part_number"] == "INT-001"
+    assert response.json()["package"] == "QFN-32"
+    assert client.get("/api/v1/components?q=int-001").json()["total"] == 1
+    assert client.get("/api/v1/components?q=qfn-32").json()["total"] == 1
+    other = register(client, "OTHER")
+    assert client.patch(
+        f"/api/v1/components/{other}", json={"internal_part_number": "int-001"}
+    ).status_code == 409
+    assert client.patch(
+        f"/api/v1/components/{other}", json={"manufacturer": "Acme", "part_number": "ABC123"}
+    ).status_code == 409
+    assert client.patch(f"/api/v1/components/{other}", json={}).status_code == 422
+    assert client.patch(f"/api/v1/components/{other}", json={"manufacturer": None}).status_code == 422
+    assert client.patch("/api/v1/components/999", json={"category": "RF"}).status_code == 404
+
+
+def test_lifecycle_transitions_and_release_requirements(client):
+    component_id = register(client)
+    endpoint = f"/api/v1/components/{component_id}/lifecycle"
+    original_updated_at = client.get(f"/api/v1/components/{component_id}").json()["updated_at"]
+    assert client.post(endpoint, json={"status": "ENGINEER_APPROVED"}).status_code == 409
+    validated = client.post(endpoint, json={"status": "VALIDATED"}).json()
+    assert validated["lifecycle_status"] == "VALIDATED"
+    assert validated["updated_at"] != original_updated_at
+    assert client.post(endpoint, json={"status": "ENGINEER_APPROVED"}).json()["lifecycle_status"] == "ENGINEER_APPROVED"
+    assert client.post(endpoint, json={"status": "RELEASED"}).json()["lifecycle_status"] == "RELEASED"
+    assert client.post(endpoint, json={"status": "DRAFT"}).status_code == 409
+
+    incomplete = client.post(
+        "/api/v1/components", json={"manufacturer": "Acme", "part_number": "EMPTY"}
+    ).json()["id"]
+    url = f"/api/v1/components/{incomplete}/lifecycle"
+    assert client.post(url, json={"status": "VALIDATED"}).status_code == 200
+    assert client.post(url, json={"status": "ENGINEER_APPROVED"}).status_code == 200
+    failed = client.post(url, json={"status": "RELEASED"})
+    assert failed.status_code == 409
+    assert "description" in failed.json()["detail"]
+
+
+def test_canonical_pin_table_replace_is_strict_atomic_and_ordered(client):
+    component_id = register(client)
+    endpoint = f"/api/v1/components/{component_id}/pins"
+    replacement = {
+        "source_type": "MANUAL",
+        "pins": [
+            {"pin_number": "EP", "pin_name": "GND"},
+            {"pin_number": "2", "pin_name": "MISO"},
+            {"pin_number": "1", "pin_name": "MOSI"},
+            {"pin_number": "A1", "pin_name": "VCC"},
+            {"pin_number": "PAD", "pin_name": "GROUND_PAD"},
+        ],
+    }
+    result = client.put(endpoint, json=replacement)
+    assert result.status_code == 200, result.text
+    assert [pin["pin_number"] for pin in result.json()["pins"]] == ["1", "2", "A1", "EP", "PAD"]
+    detail = client.get(f"/api/v1/components/{component_id}").json()
+    assert detail["pin_summary"] == {"count": 5, "source_type": "MANUAL"}
+    duplicate = client.put(
+        endpoint,
+        json={"source_type": "USER_IMPORT", "pins": [
+            {"pin_number": "A1", "pin_name": "ONE"},
+            {"pin_number": "a1", "pin_name": "TWO"},
+        ]},
+    )
+    assert duplicate.status_code == 409
+    assert client.get(endpoint).json()["pins"] == result.json()["pins"]
+    assert client.put(
+        endpoint, json={"source_type": "MANUAL", "pins": [{"pin_number": 1, "pin_name": "X"}]}
+    ).status_code == 422
+    assert client.put(
+        endpoint, json={"source_type": "MANUAL", "pins": [{"pin_number": " ", "pin_name": "X"}]}
+    ).status_code == 422
+    assert client.put(
+        endpoint, json={"source_type": "MANUAL", "pins": [{"pin_number": "1", "pin_name": " "}]}
+    ).status_code == 422
+    assert client.put(endpoint, json={"source_type": "UNKNOWN", "pins": []}).status_code == 422
+    assert client.get("/api/v1/components/999/pins").status_code == 404
+
+
 def test_multiple_documents_revisions_and_original_bytes(client, pdf, settings):
     component_id = register(client)
     first = upload(client, component_id, pdf, datasheet_date="2026-09-01")

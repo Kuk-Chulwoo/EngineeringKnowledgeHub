@@ -6,7 +6,17 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
-from .schemas import Component, ComponentCreate, ComponentDetail, ComponentList, Revision
+from .schemas import (
+    Component,
+    ComponentCreate,
+    ComponentDetail,
+    ComponentList,
+    ComponentUpdate,
+    LifecycleUpdate,
+    PinTable,
+    PinTableReplace,
+    Revision,
+)
 from .services import HubService
 
 router = APIRouter(prefix="/api/v1")
@@ -42,6 +52,26 @@ def search_components(
 @router.get("/components/{component_id}", response_model=ComponentDetail)
 def get_component(component_id: int, hub: Service) -> dict:
     return hub.component(component_id)
+
+
+@router.patch("/components/{component_id}", response_model=ComponentDetail)
+def update_component(component_id: int, payload: ComponentUpdate, hub: Service) -> dict:
+    return hub.update_component(component_id, payload)
+
+
+@router.post("/components/{component_id}/lifecycle", response_model=ComponentDetail)
+def update_lifecycle(component_id: int, payload: LifecycleUpdate, hub: Service) -> dict:
+    return hub.update_lifecycle(component_id, payload)
+
+
+@router.get("/components/{component_id}/pins", response_model=PinTable)
+def get_pins(component_id: int, hub: Service) -> dict:
+    return hub.pins(component_id)
+
+
+@router.put("/components/{component_id}/pins", response_model=PinTable)
+def replace_pins(component_id: int, payload: PinTableReplace, hub: Service) -> dict:
+    return hub.replace_pins(component_id, payload)
 
 
 @router.post("/components/{component_id}/revisions", response_model=Revision, status_code=201)

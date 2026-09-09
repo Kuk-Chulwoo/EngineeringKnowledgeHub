@@ -686,9 +686,11 @@ def test_v2_migration_preserves_populated_review_lineage_and_all_triggers(tmp_pa
     Database(path).initialize()
     assert repo.read_snapshot(snapshot["id"]) == snapshot
     with sqlite3.connect(path) as c:
-        assert c.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert c.execute("PRAGMA user_version").fetchone()[0] == 4
         assert not c.execute("PRAGMA foreign_key_check").fetchall()
-        assert before == {t: c.execute(f"SELECT * FROM {t}").fetchall() for t in tables}
+        after = {t: c.execute(f"SELECT * FROM {t}").fetchall() for t in tables}
+        assert [row[:7] for row in after.pop("components")] == before.pop("components")
+        assert before == after
         with pytest.raises(sqlite3.IntegrityError):
             c.execute("DELETE FROM engineering_fields")
         with pytest.raises(sqlite3.IntegrityError):

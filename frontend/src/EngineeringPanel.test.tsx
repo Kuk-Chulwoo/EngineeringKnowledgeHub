@@ -8,6 +8,8 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const detail: Detail = {
   id: 1, manufacturer: 'Fabricated', part_number: 'SYNTH-DEMO', description: 'Test',
   category: 'Test', package: 'Test', created_at: '2026-09-08T00:00:00Z',
+  updated_at: '2026-09-08T00:00:00Z', internal_part_number: null, lifecycle_status: 'DRAFT',
+  pin_summary: { count: 0, source_type: null },
   documents: [{ id: 1, title: 'Synthetic', revisions: [{ id: 7, revision: 'TEST',
     filename: 'fabricated.pdf', datasheet_date: null, uploaded_at: '2026-09-08T00:00:00Z',
     size_bytes: 1234, sha256: 'abc' }] }],

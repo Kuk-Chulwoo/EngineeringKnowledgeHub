@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, fileUrl, type Component, type Detail, type Revision, type SearchResult } from './api';
+import { api, fileUrl, type Component, type Detail, type PinTable, type Revision, type SearchResult } from './api';
 import { componentTabs } from './modules';
 import EngineeringPanel from './EngineeringPanel';
 import './engineering.css';
@@ -13,6 +13,7 @@ function Register({ onSaved, onCancel }: { onSaved: (value: Component) => void; 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(event.currentTarget));
+    if (!values.internal_part_number) delete values.internal_part_number;
     setBusy(true); setError('');
     try {
       onSaved(await api<Component>('/components', {
@@ -27,6 +28,7 @@ function Register({ onSaved, onCancel }: { onSaved: (value: Component) => void; 
       <div className="fields">
         <label>Manufacturer<input name="manufacturer" required maxLength={200} autoFocus /></label>
         <label>Manufacturer Part Number<input name="part_number" required maxLength={200} /></label>
+        <label>Internal Part Number<input name="internal_part_number" maxLength={200} /></label>
         <label>Category<input name="category" maxLength={200} placeholder="e.g. Power management" /></label>
         <label>Package<input name="package" maxLength={200} placeholder="e.g. SOIC-8" /></label>
         <label className="wide">Description<textarea name="description" maxLength={4000} rows={3} /></label>
@@ -78,6 +80,8 @@ function ComponentPage({ id }: { id: number }) {
   const [refresh, setRefresh] = useState(0);
   const [error, setError] = useState('');
   const [viewing, setViewing] = useState<Revision | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [pins, setPins] = useState<PinTable | null>(null);
   useEffect(() => {
     const controller = new AbortController();
     setError('');
@@ -88,9 +92,36 @@ function ComponentPage({ id }: { id: number }) {
   if (!detail) return <section className="panel"><p role={error ? 'alert' : 'status'}>{error || 'Loading component…'}</p>
     {error && <button onClick={() => setRefresh(n => n + 1)}>Retry</button>}</section>;
   const count = detail.documents.reduce((total, document) => total + document.revisions.length, 0);
+  const transitions: Record<Component['lifecycle_status'], Component['lifecycle_status'][]> = {
+    DRAFT: ['VALIDATED'], VALIDATED: ['DRAFT', 'ENGINEER_APPROVED'],
+    ENGINEER_APPROVED: ['VALIDATED', 'RELEASED'], RELEASED: ['ENGINEER_APPROVED'],
+  };
+  async function saveMetadata(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setError('');
+    try {
+      const values: Record<string, FormDataEntryValue | null> =
+        Object.fromEntries(new FormData(event.currentTarget));
+      if (!values.internal_part_number) values.internal_part_number = null;
+      await api(`/components/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values) });
+      setEditing(false); setRefresh(n => n + 1);
+    } catch (error) { setError(message(error)); }
+  }
+  async function transition(status: Component['lifecycle_status']) {
+    setError('');
+    try {
+      await api(`/components/${id}/lifecycle`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }) }); setRefresh(n => n + 1);
+    } catch (error) { setError(message(error)); }
+  }
+  async function viewPins() {
+    try { setPins(await api<PinTable>(`/components/${id}/pins`)); }
+    catch (error) { setError(message(error)); }
+  }
   return <article className="panel detail">
     <header className="component-heading"><div><p className="eyebrow">{detail.manufacturer}</p>
-      <h2>{detail.part_number}</h2></div><span className="badge">{detail.category || 'Uncategorized'}</span></header>
+      <h2>{detail.part_number}</h2><p>{detail.internal_part_number || 'No internal part number'}</p></div>
+      <span className="badge">{detail.lifecycle_status}</span></header>
     <p className="description">{detail.description || 'No description provided.'}</p>
     <nav className="tabs" aria-label="Component sections">
       {componentTabs.map(item => <button key={item.id} className={tab === item.id ? 'active' : ''}
@@ -99,14 +130,32 @@ function ComponentPage({ id }: { id: number }) {
     </nav>
     {error && <p className="error" role="alert">{error} <button onClick={() => setRefresh(n => n + 1)}>Retry</button></p>}
     {tab === 'engineering' ? <EngineeringPanel detail={detail} /> : tab === 'overview' ? <>
+      <div className="actions"><button className="quiet" onClick={() => setEditing(value => !value)}>Edit metadata</button>
+        {transitions[detail.lifecycle_status].map(status => <button key={status} onClick={() => transition(status)}>{status}</button>)}</div>
+      {editing && <form onSubmit={saveMetadata}><div className="fields">
+        <label>Internal Part Number<input name="internal_part_number" defaultValue={detail.internal_part_number || ''} /></label>
+        <label>Manufacturer<input name="manufacturer" required defaultValue={detail.manufacturer} /></label>
+        <label>Manufacturer Part Number<input name="part_number" required defaultValue={detail.part_number} /></label>
+        <label>Category<input name="category" defaultValue={detail.category} /></label>
+        <label>Package<input name="package" defaultValue={detail.package} /></label>
+        <label className="wide">Description<textarea name="description" defaultValue={detail.description} /></label>
+      </div><button type="submit">Save metadata</button></form>}
       <dl className="facts">
         <div><dt>Manufacturer</dt><dd>{detail.manufacturer}</dd></div>
         <div><dt>Part Number</dt><dd>{detail.part_number}</dd></div>
         <div><dt>Category</dt><dd>{detail.category || '—'}</dd></div>
         <div><dt>Package</dt><dd>{detail.package || '—'}</dd></div>
+        <div><dt>Internal Part Number</dt><dd>{detail.internal_part_number || '—'}</dd></div>
+        <div><dt>Lifecycle</dt><dd>{detail.lifecycle_status}</dd></div>
+        <div><dt>Pins</dt><dd>{detail.pin_summary.count} · {detail.pin_summary.source_type || 'No source'}</dd></div>
         <div><dt>Registered</dt><dd>{time(detail.created_at)}</dd></div>
         <div><dt>Documents</dt><dd>{detail.documents.length} documents · {count} revisions</dd></div>
       </dl>
+      <div className="overview-action"><h3>Canonical pin table</h3>
+        <p className="muted">{detail.pin_summary.count} pins available for this company part.</p>
+        <button onClick={viewPins}>View Pins</button></div>
+      {pins && <div className="table-scroll"><table><thead><tr><th>Pin Number</th><th>Pin Name</th></tr></thead>
+        <tbody>{pins.pins.map(pin => <tr key={pin.id}><td>{pin.pin_number}</td><td>{pin.pin_name}</td></tr>)}</tbody></table></div>}
       <div className="overview-action"><h3>Datasheets & reference documents</h3>
         <p className="muted">Keep original PDFs and their revision history with this component.</p>
         <button onClick={() => setTab('documents')}>Manage documents</button></div>

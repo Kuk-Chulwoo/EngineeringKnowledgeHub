@@ -5,7 +5,8 @@ import App from './App';
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const component = { id: 1, manufacturer: 'Acme', part_number: 'REF123', description: 'Reference',
-  category: 'Analog', package: 'SOIC-8', created_at: '2026-09-08T00:00:00Z' };
+  category: 'Analog', package: 'SOIC-8', internal_part_number: 'INT-1', lifecycle_status: 'DRAFT',
+  created_at: '2026-09-08T00:00:00Z', updated_at: '2026-09-08T00:00:00Z' };
 const revision = { id: 3, revision: 'A', filename: 'reference.pdf', datasheet_date: '2026-09-01',
   uploaded_at: '2026-09-08T00:00:00Z', size_bytes: 2048, sha256: 'abc' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
@@ -14,7 +15,7 @@ it('registers a component and opens the saved overview', async () => {
   const user = userEvent.setup();
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (init?.method === 'POST') return json(component, 201);
-    if (url === '/api/v1/components/1') return json({ ...component, documents: [] });
+    if (url === '/api/v1/components/1') return json({ ...component, documents: [], pin_summary: { count: 0, source_type: null } });
     return json({ items: [], total: 0, limit: 20, offset: 0 });
   });
   vi.stubGlobal('fetch', fetcher);
@@ -35,6 +36,7 @@ it('uploads a PDF, refreshes revision history, and exposes view/download', async
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (init?.method === 'POST') { uploaded = true; return json(revision, 201); }
     if (url === '/api/v1/components/1') return json({ ...component,
+      pin_summary: { count: 0, source_type: null },
       documents: uploaded ? [{ id: 2, title: 'Datasheet', revisions: [revision] }] : [] });
     return json({ items: [component], total: 1, limit: 20, offset: 0 });
   });
@@ -80,4 +82,29 @@ it('sends the current search term to the catalog endpoint', async () => {
   await waitFor(() => expect(fetcher).toHaveBeenCalledWith(
     '/api/v1/components?q=voltage&limit=20&offset=0', expect.any(Object)));
   await screen.findByText('No matching components');
+});
+
+it('edits company metadata, transitions lifecycle, and views canonical pins', async () => {
+  const user = userEvent.setup();
+  const detail = { ...component, documents: [], pin_summary: { count: 1, source_type: 'MANUAL' } };
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/pins')) return json({ count: 1, source_type: 'MANUAL', pins: [{
+      id: 9, component_id: 1, pin_number: 'A1', pin_name: 'VCC', source_type: 'MANUAL',
+    }] });
+    if (init?.method === 'PATCH' || url.endsWith('/lifecycle')) return json(detail);
+    if (url === '/api/v1/components/1') return json(detail);
+    return json({ items: [component], total: 1, limit: 20, offset: 0 });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<App />);
+  await user.click(await screen.findByRole('button', { name: /Acme REF123/ }));
+  await user.click(await screen.findByRole('button', { name: 'Edit metadata' }));
+  await user.clear(screen.getByLabelText('Internal Part Number'));
+  await user.type(screen.getByLabelText('Internal Part Number'), 'INT-2');
+  await user.click(screen.getByRole('button', { name: 'Save metadata' }));
+  expect(fetcher.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(true);
+  await user.click(screen.getByRole('button', { name: 'VALIDATED' }));
+  expect(fetcher.mock.calls.some(([url]) => url.endsWith('/lifecycle'))).toBe(true);
+  await user.click(screen.getByRole('button', { name: 'View Pins' }));
+  expect(await screen.findByText('VCC')).toBeTruthy();
 });
