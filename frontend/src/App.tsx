@@ -1,6 +1,6 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
-import { api, fileUrl, type Component, type Detail, type PinImportPreview,
-  type PinTable, type Revision, type SearchResult } from './api';
+import { api, fileUrl, symbolFileUrl, type Component, type Detail, type PinImportPreview,
+  type PinTable, type Revision, type SchematicSymbol, type SearchResult } from './api';
 import { componentTabs } from './modules';
 import EngineeringPanel from './EngineeringPanel';
 import './engineering.css';
@@ -75,6 +75,101 @@ function Upload({ detail, onSaved }: { detail: Detail; onSaved: () => void }) {
   </section>;
 }
 
+function SymbolSection({ componentId, pinCount, symbols, onChanged }: {
+  componentId: number; pinCount: number; symbols: SchematicSymbol[]; onChanged: () => void;
+}) {
+  const [registering, setRegistering] = useState(false);
+  const [editing, setEditing] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const transitions: Record<Component['lifecycle_status'], Component['lifecycle_status'][]> = {
+    DRAFT: ['VALIDATED'], VALIDATED: ['DRAFT', 'ENGINEER_APPROVED'],
+    ENGINEER_APPROVED: ['VALIDATED', 'RELEASED'], RELEASED: ['ENGINEER_APPROVED'],
+  };
+  async function register(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setBusy(true); setError('');
+    const form = event.currentTarget; const data = new FormData(form);
+    const file = data.get('file') as File;
+    const body = Object.fromEntries(['cad_tool', 'cad_version', 'symbol_name', 'source_type',
+      'revision', 'notes'].map(key => [key, data.get(key)]));
+    try {
+      const created = await api<SchematicSymbol>(`/components/${componentId}/symbols`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const upload = new FormData(); upload.append('file', file);
+      await api(`/symbols/${created.id}/file`, { method: 'POST', body: upload });
+      setRegistering(false); onChanged();
+    } catch (error) { setError(message(error)); }
+    finally { setBusy(false); }
+  }
+  async function upload(symbolId: number, file: File) {
+    const data = new FormData(); data.append('file', file); setBusy(true); setError('');
+    try { await api(`/symbols/${symbolId}/file`, { method: 'POST', body: data }); onChanged(); }
+    catch (error) { setError(message(error)); } finally { setBusy(false); }
+  }
+  async function update(event: FormEvent<HTMLFormElement>, symbolId: number) {
+    event.preventDefault(); setBusy(true); setError('');
+    try {
+      await api(`/symbols/${symbolId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget))) });
+      setEditing(null); onChanged();
+    } catch (error) { setError(message(error)); } finally { setBusy(false); }
+  }
+  async function action(symbolId: number, path: string, status: string) {
+    setBusy(true); setError('');
+    try { await api(`/symbols/${symbolId}/${path}`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); onChanged(); }
+    catch (error) { setError(message(error)); } finally { setBusy(false); }
+  }
+  return <section className="overview-action" aria-labelledby="symbols-title">
+    <div className="section-heading"><div><h3 id="symbols-title">Schematic Symbol</h3>
+      <p className="muted">Canonical pins: {pinCount}</p></div>
+      {!registering && <button onClick={() => setRegistering(true)}>Register Existing Symbol</button>}</div>
+    {error && <p role="alert" className="error">{error}</p>}
+    {registering && <form onSubmit={register}><fieldset disabled={busy}><div className="fields">
+      <label>CAD Tool<select name="cad_tool" defaultValue="PADS_LOGIC"><option value="PADS_LOGIC">PADS Logic</option></select></label>
+      <label>Version<input name="cad_version" required defaultValue="VX2.11" /></label>
+      <label>Symbol Name<input name="symbol_name" required /></label>
+      <label>Source Type<select name="source_type" defaultValue="EXISTING_COMPANY_LIBRARY">
+        <option value="EXISTING_COMPANY_LIBRARY">Existing Company Library</option>
+        <option value="MANUFACTURER_LIBRARY">Manufacturer Library</option>
+        <option value="ENGINEER_CREATED">Engineer Created</option>
+        <option value="IMPORTED_VENDOR_LIBRARY">Imported Vendor Library</option></select></label>
+      <label>Revision<input name="revision" required /></label>
+      <label>Symbol File<input name="file" type="file" accept=".c" required /></label>
+      <label className="wide">Notes<textarea name="notes" rows={2} /></label>
+    </div><div className="actions"><button className="quiet" type="button" onClick={() => setRegistering(false)}>Cancel</button>
+      <button type="submit">Register</button></div></fieldset></form>}
+    {symbols.length === 0 && !registering && <p>No schematic symbol registered.</p>}
+    {symbols.map(symbol => <article className="symbol-card" key={symbol.id}>
+      <div className="section-heading"><h4>{symbol.symbol_name}</h4><span className="badge">{symbol.lifecycle_status}</span></div>
+      {editing === symbol.id ? <form onSubmit={event => update(event, symbol.id)}><div className="fields">
+        <label>Version<input name="cad_version" required defaultValue={symbol.cad_version} /></label>
+        <label>Symbol Name<input name="symbol_name" required defaultValue={symbol.symbol_name} /></label>
+        <label>Source Type<select name="source_type" defaultValue={symbol.source_type}>
+          <option value="EXISTING_COMPANY_LIBRARY">Existing Company Library</option>
+          <option value="MANUFACTURER_LIBRARY">Manufacturer Library</option><option value="ENGINEER_CREATED">Engineer Created</option>
+          <option value="IMPORTED_VENDOR_LIBRARY">Imported Vendor Library</option></select></label>
+        <label>Revision<input name="revision" required defaultValue={symbol.revision} /></label>
+        <label className="wide">Notes<textarea name="notes" defaultValue={symbol.notes} /></label>
+      </div><button type="submit" disabled={busy}>Save Symbol</button></form> : <dl className="facts">
+        <div><dt>CAD Tool / Version</dt><dd>PADS Logic · {symbol.cad_version}</dd></div>
+        <div><dt>Source</dt><dd>{symbol.source_type}</dd></div><div><dt>Revision</dt><dd>{symbol.revision}</dd></div>
+        <div><dt>Pin Review</dt><dd>{symbol.pin_validation_status}</dd></div>
+        <div><dt>File</dt><dd>{symbol.source_filename || 'Not attached'}</dd></div>
+      </dl>}
+      <div className="actions"><button className="quiet" onClick={() => setEditing(symbol.id)}>Edit</button>
+        {symbol.source_filename ? <a className="button-link" href={symbolFileUrl(symbol.id, true)}>Download</a>
+          : <label className="button-link">Attach Source File<input className="visually-hidden" type="file" accept=".c"
+            onChange={event => { const file = event.target.files?.[0]; if (file) upload(symbol.id, file); }} /></label>}
+        {symbol.pin_validation_status === 'NOT_CHECKED' && <button disabled={busy}
+          onClick={() => action(symbol.id, 'pin-validation', 'ENGINEER_REVIEWED')}>Mark Pins Engineer Reviewed</button>}
+        {transitions[symbol.lifecycle_status].map(status => <button disabled={busy} key={status}
+          onClick={() => action(symbol.id, 'lifecycle', status)}>{status}</button>)}</div>
+    </article>)}
+  </section>;
+}
+
 function ComponentPage({ id }: { id: number }) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [tab, setTab] = useState('overview');
@@ -87,11 +182,19 @@ function ComponentPage({ id }: { id: number }) {
   const [pinImportBusy, setPinImportBusy] = useState(false);
   const [replaceConfirmed, setReplaceConfirmed] = useState(false);
   const [pinImportStatus, setPinImportStatus] = useState('');
+  const [symbols, setSymbols] = useState<SchematicSymbol[]>([]);
   useEffect(() => {
     const controller = new AbortController();
     setError('');
     api<Detail>(`/components/${id}`, { signal: controller.signal })
       .then(setDetail).catch(error => { if (!controller.signal.aborted) setError(message(error)); });
+    return () => controller.abort();
+  }, [id, refresh]);
+  useEffect(() => {
+    const controller = new AbortController();
+    api<unknown>(`/components/${id}/symbols`, { signal: controller.signal })
+      .then(value => setSymbols(Array.isArray(value) ? value as SchematicSymbol[] : []))
+      .catch(error => { if (!controller.signal.aborted) setError(message(error)); });
     return () => controller.abort();
   }, [id, refresh]);
   if (!detail) return <section className="panel"><p role={error ? 'alert' : 'status'}>{error || 'Loading component…'}</p>
@@ -208,6 +311,8 @@ function ComponentPage({ id }: { id: number }) {
           <button onClick={importPins} disabled={pinImportBusy || !pinPreview.valid ||
             (currentPinCount > 0 && !replaceConfirmed)}>Import Pins</button></div>
       </section>}
+      <SymbolSection componentId={id} pinCount={currentPinCount} symbols={symbols}
+        onChanged={() => setRefresh(n => n + 1)} />
       <div className="overview-action"><h3>Datasheets & reference documents</h3>
         <p className="muted">Keep original PDFs and their revision history with this component.</p>
         <button onClick={() => setTab('documents')}>Manage documents</button></div>

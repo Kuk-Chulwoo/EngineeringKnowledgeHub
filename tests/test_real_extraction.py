@@ -686,7 +686,7 @@ def test_v2_migration_preserves_populated_review_lineage_and_all_triggers(tmp_pa
     Database(path).initialize()
     assert repo.read_snapshot(snapshot["id"]) == snapshot
     with sqlite3.connect(path) as c:
-        assert c.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert c.execute("PRAGMA user_version").fetchone()[0] == 5
         assert not c.execute("PRAGMA foreign_key_check").fetchall()
         after = {t: c.execute(f"SELECT * FROM {t}").fetchall() for t in tables}
         assert [row[:7] for row in after.pop("components")] == before.pop("components")

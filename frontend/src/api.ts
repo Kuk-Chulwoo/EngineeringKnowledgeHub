@@ -16,11 +16,21 @@ export type PinImportIssue = { code: string; row: number | null; field: string |
 export type PinImportPreview = { filename: string; format: 'csv' | 'xlsx' | null; valid: boolean;
   count: number; errors: PinImportIssue[]; warnings: PinImportIssue[];
   pins: Array<{ pin_number: string; pin_name: string }> };
+export type SchematicSymbol = {
+  id: number; component_id: number; cad_tool: 'PADS_LOGIC'; cad_version: string;
+  symbol_name: string; source_type: 'EXISTING_COMPANY_LIBRARY' | 'MANUFACTURER_LIBRARY' |
+    'ENGINEER_CREATED' | 'IMPORTED_VENDOR_LIBRARY'; source_filename: string | null;
+  revision: string; lifecycle_status: Component['lifecycle_status'];
+  pin_validation_status: 'NOT_CHECKED' | 'ENGINEER_REVIEWED'; notes: string;
+  size_bytes: number | null; sha256: string | null; created_at: string; updated_at: string;
+};
 export type Detail = Component & { documents: Document[];
   pin_summary: { count: number; source_type: Pin['source_type'] | null } };
 export type SearchResult = { items: Component[]; total: number; limit: number; offset: number };
 export const fileUrl = (id: number, download = false) =>
   `/api/v1/revisions/${id}/file${download ? '?download=true' : ''}`;
+export const symbolFileUrl = (id: number, download = false) =>
+  `/api/v1/symbols/${id}/file${download ? '?download=true' : ''}`;
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch('/api/v1' + path, init);

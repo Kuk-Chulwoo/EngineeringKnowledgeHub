@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .migration_v3 import migrate_v2_to_v3
 from .migration_v4 import migrate_v3_to_v4
+from .migration_v5 import migrate_v4_to_v5
 from .migrations import execute_statements, migrate_v1_to_v2
 
 SCHEMA = """
@@ -61,9 +62,9 @@ class Database:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2, 3, 4):
+            if version not in (0, 1, 2, 3, 4, 5):
                 raise RuntimeError(f"Unsupported database schema version: {version}")
-            if version in (1, 2, 3):
+            if version in (1, 2, 3, 4):
                 # SQLite backup includes a coherent snapshot; never overwrite an earlier backup.
                 stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
                 backup_path = self.path.with_name(self.path.name + f".v{version}-backup-" + stamp)
@@ -83,5 +84,8 @@ class Database:
                 version = 3
             if version == 3:
                 migrate_v3_to_v4(connection)
+                version = 4
+            if version == 4:
+                migrate_v4_to_v5(connection)
             if connection.execute("PRAGMA foreign_key_check").fetchall():
                 raise RuntimeError("Foreign key check failed")

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
 
@@ -156,4 +156,49 @@ it('shows preview validation errors and disables import', async () => {
   await user.upload(screen.getByLabelText('Import Pin File'), new File(['bad'], 'bad.csv'));
   expect(await screen.findByText('Duplicate pin number')).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Import Pins' }).hasAttribute('disabled')).toBe(true);
+});
+
+it('registers an existing symbol, uploads its source, reviews pins, and advances lifecycle', async () => {
+  const user = userEvent.setup();
+  const detail = { ...component, documents: [], pin_summary: { count: 1, source_type: 'MANUAL' } };
+  let symbols: Array<Record<string, unknown>> = [];
+  const baseSymbol = { id: 10, component_id: 1, cad_tool: 'PADS_LOGIC', cad_version: 'VX2.11',
+    symbol_name: 'CC1120', source_type: 'EXISTING_COMPANY_LIBRARY', source_filename: null,
+    revision: 'A', lifecycle_status: 'DRAFT', pin_validation_status: 'NOT_CHECKED', notes: '',
+    size_bytes: null, sha256: null, created_at: '', updated_at: '' };
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/components/1/symbols') && init?.method === 'POST') {
+      symbols = [{ ...baseSymbol }]; return json(symbols[0], 201);
+    }
+    if (url.endsWith('/symbols/10/file') && init?.method === 'POST') {
+      symbols[0] = { ...symbols[0], source_filename: 'CC1120.c', size_bytes: 3, sha256: 'abc' };
+      return json(symbols[0]);
+    }
+    if (url.endsWith('/pin-validation')) {
+      symbols[0] = { ...symbols[0], pin_validation_status: 'ENGINEER_REVIEWED' }; return json(symbols[0]);
+    }
+    if (url.endsWith('/lifecycle')) {
+      symbols[0] = { ...symbols[0], lifecycle_status: 'VALIDATED' }; return json(symbols[0]);
+    }
+    if (url.endsWith('/components/1/symbols')) return json(symbols);
+    if (url === '/api/v1/components/1') return json(detail);
+    return json({ items: [component], total: 1, limit: 20, offset: 0 });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<App />);
+  await user.click(await screen.findByRole('button', { name: /Acme REF123/ }));
+  const section = await screen.findByRole('region', { name: 'Schematic Symbol' });
+  expect(within(section).getByText('No schematic symbol registered.')).toBeTruthy();
+  await user.click(within(section).getByRole('button', { name: 'Register Existing Symbol' }));
+  await user.type(within(section).getByLabelText('Symbol Name'), 'CC1120');
+  await user.type(within(section).getByLabelText('Revision'), 'A');
+  await user.upload(within(section).getByLabelText('Symbol File'), new File(['CAE'], 'CC1120.c'));
+  fireEvent.submit(within(section).getByRole('button', { name: 'Register' }).closest('form')!);
+  await within(section).findByText('CC1120.c');
+  expect(within(section).getByText(/PADS Logic/)).toBeTruthy();
+  await user.click(within(section).getByRole('button', { name: 'Mark Pins Engineer Reviewed' }));
+  await within(section).findByText('ENGINEER_REVIEWED');
+  await user.click(within(section).getByRole('button', { name: 'VALIDATED' }));
+  await within(section).findByText('VALIDATED', { selector: '.badge' });
+  expect(screen.queryByText('PCB Footprint')).toBeNull();
 });

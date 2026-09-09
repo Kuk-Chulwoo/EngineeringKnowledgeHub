@@ -14,6 +14,10 @@ from .repository import Repository
 from .routes import router
 from .services import HubService, ServiceError
 from .storage import LocalStorage, Storage
+from .symbols.repository import SymbolRepository
+from .symbols.routes import router as symbols_router
+from .symbols.service import SymbolService
+from .symbols.storage import SymbolStorage
 
 
 class BodyLimitMiddleware:
@@ -64,6 +68,11 @@ def create_app(settings: Settings | None = None, storage: Storage | None = None)
         storage or LocalStorage(settings.storage_root),
         settings.max_upload_bytes,
     )
+    app.state.symbols = SymbolService(
+        SymbolRepository(database),
+        SymbolStorage(settings.storage_root.parent / "library" / "schematic-symbols"),
+        app.state.service,
+    )
     app.add_middleware(BodyLimitMiddleware, max_bytes=settings.max_upload_bytes + 1024 * 1024)
 
     @app.exception_handler(ServiceError)
@@ -73,6 +82,7 @@ def create_app(settings: Settings | None = None, storage: Storage | None = None)
     app.state.engineering = EngineeringService(EngineeringRepository(database), app.state.service, ProviderPolicy.from_env())
     app.state.reviewer = LocalReviewer(settings.reviewer_file)
     app.include_router(engineering_router)
+    app.include_router(symbols_router)
     app.include_router(router)
     return app
 

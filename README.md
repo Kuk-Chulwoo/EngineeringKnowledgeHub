@@ -122,6 +122,15 @@ validation errors, review the parsed pins, and explicitly confirm the import. Im
 replaces the current canonical pin table only after user confirmation. Uploaded import
 files are parsed in memory and are not retained.
 
+### Existing PADS Logic symbols
+
+A Company Part can register an existing PADS Logic schematic symbol and attach its
+immutable ASCII `.c` source file. Symbol metadata, lifecycle, file hash, and explicit
+engineer pin review are managed independently from the Company Part lifecycle. A symbol
+can be released only after its source file is attached, the Company Part has canonical
+pins, and an engineer marks the pin table as reviewed. This foundation does not parse or
+generate PADS symbols and does not handle PCB decal files.
+
 ## Configuration and storage
 
 See .env.example. `start-all.ps1` loads root `.env.local`; the application and individual

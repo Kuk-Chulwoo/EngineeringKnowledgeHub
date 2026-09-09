@@ -11,3 +11,5 @@
 .visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .replacement-confirm{flex-direction:row;align-items:center;margin:1rem 0;padding:.75rem;background:#fff8e6}
 .replacement-confirm input{width:auto}.overview-action .actions{flex-wrap:wrap}
+.symbol-card{margin-top:1rem;padding:1rem;background:white;border:1px solid #ccd7df;border-radius:4px}
+.symbol-card .facts{margin-bottom:1rem}
