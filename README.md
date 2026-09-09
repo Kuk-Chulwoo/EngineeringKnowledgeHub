@@ -114,6 +114,14 @@ a conflict. No previous revision is overwritten. Damaged, empty, encrypted and
 oversized PDFs are rejected. Default maximum file size is 50 MiB.
 Dates are optional. Upload timestamps are stored in UTC and displayed locally.
 
+### Company Part Pin Import
+
+From a Company Part's canonical pin table section, download the CSV or XLSX template,
+fill only **Pin Number** and **Pin Name**, and upload it for preview. Fix any row-level
+validation errors, review the parsed pins, and explicitly confirm the import. Import
+replaces the current canonical pin table only after user confirmation. Uploaded import
+files are parsed in memory and are not retained.
+
 ## Configuration and storage
 
 See .env.example. `start-all.ps1` loads root `.env.local`; the application and individual

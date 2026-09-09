@@ -1,11 +1,14 @@
 from collections.abc import Iterator
 from datetime import date
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
+from .pin_import.parser import MAX_IMPORT_BYTES
+from .pin_import.schemas import PinImportPreview
+from .pin_import.service import PinImportService
 from .schemas import (
     Component,
     ComponentCreate,
@@ -27,6 +30,7 @@ def service(request: Request) -> HubService:
 
 
 Service = Annotated[HubService, Depends(service)]
+pin_import = PinImportService()
 
 
 @router.get("/health")
@@ -72,6 +76,30 @@ def get_pins(component_id: int, hub: Service) -> dict:
 @router.put("/components/{component_id}/pins", response_model=PinTable)
 def replace_pins(component_id: int, payload: PinTableReplace, hub: Service) -> dict:
     return hub.replace_pins(component_id, payload)
+
+
+@router.get("/pin-import/template")
+def pin_import_template(format: Literal["csv", "xlsx"]) -> Response:
+    content, media_type, filename = pin_import.template(format)
+    return Response(
+        content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post(
+    "/components/{component_id}/pin-import/preview", response_model=PinImportPreview
+)
+async def preview_pin_import(
+    component_id: int, hub: Service, file: Annotated[UploadFile, File()]
+) -> dict:
+    hub.component(component_id)
+    try:
+        content = await file.read(MAX_IMPORT_BYTES + 1)
+        return pin_import.preview(file.filename or "", content)
+    finally:
+        await file.close()
 
 
 @router.post("/components/{component_id}/revisions", response_model=Revision, status_code=201)

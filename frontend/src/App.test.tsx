@@ -108,3 +108,52 @@ it('edits company metadata, transitions lifecycle, and views canonical pins', as
   await user.click(screen.getByRole('button', { name: 'View Pins' }));
   expect(await screen.findByText('VCC')).toBeTruthy();
 });
+
+it('previews and confirms USER_IMPORT only after replacement acknowledgement', async () => {
+  const user = userEvent.setup();
+  const detail = { ...component, documents: [], pin_summary: { count: 2, source_type: 'MANUAL' } };
+  const preview = { filename: 'pins.xlsx', format: 'xlsx', valid: true, count: 2,
+    errors: [], warnings: [], pins: [{ pin_number: '1', pin_name: 'RESET_N' },
+      { pin_number: 'EP', pin_name: 'GND' }] };
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/pin-import/preview')) return json(preview);
+    if (url.endsWith('/pins') && init?.method === 'PUT') return json({ ...preview,
+      source_type: 'USER_IMPORT', pins: preview.pins.map((pin, index) => ({
+        ...pin, id: index + 1, component_id: 1, source_type: 'USER_IMPORT',
+      })) });
+    if (url === '/api/v1/components/1') return json(detail);
+    return json({ items: [component], total: 1, limit: 20, offset: 0 });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<App />);
+  await user.click(await screen.findByRole('button', { name: /Acme REF123/ }));
+  expect(screen.getByRole('link', { name: 'Download CSV Template' }).getAttribute('href'))
+    .toBe('/api/v1/pin-import/template?format=csv');
+  await user.upload(screen.getByLabelText('Import Pin File'), new File(['xlsx'], 'pins.xlsx'));
+  expect(await screen.findByText('Pin Import Preview')).toBeTruthy();
+  expect(screen.getByText(/will replace the current Pin Table \(2 pins\)/)).toBeTruthy();
+  const importButton = screen.getByRole('button', { name: 'Import Pins' });
+  expect(importButton.hasAttribute('disabled')).toBe(true);
+  await user.click(screen.getByRole('checkbox'));
+  await user.click(importButton);
+  await screen.findByText('Pin table imported.');
+  const call = fetcher.mock.calls.find(([url, init]) => url.endsWith('/pins') && init?.method === 'PUT')!;
+  expect(JSON.parse(call[1]!.body as string)).toEqual({ source_type: 'USER_IMPORT', pins: preview.pins });
+});
+
+it('shows preview validation errors and disables import', async () => {
+  const user = userEvent.setup();
+  const detail = { ...component, documents: [], pin_summary: { count: 0, source_type: null } };
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.endsWith('/pin-import/preview')) return json({ filename: 'bad.csv', format: 'csv',
+      valid: false, count: 0, warnings: [], pins: [], errors: [{ code: 'DUPLICATE_PIN_NUMBER',
+        row: 14, field: 'pin_number', message: 'Duplicate pin number' }] });
+    if (url === '/api/v1/components/1') return json(detail);
+    return json({ items: [component], total: 1, limit: 20, offset: 0 });
+  }));
+  render(<App />);
+  await user.click(await screen.findByRole('button', { name: /Acme REF123/ }));
+  await user.upload(screen.getByLabelText('Import Pin File'), new File(['bad'], 'bad.csv'));
+  expect(await screen.findByText('Duplicate pin number')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Import Pins' }).hasAttribute('disabled')).toBe(true);
+});

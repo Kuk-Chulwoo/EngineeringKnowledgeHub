@@ -1,5 +1,6 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { api, fileUrl, type Component, type Detail, type PinTable, type Revision, type SearchResult } from './api';
+import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
+import { api, fileUrl, type Component, type Detail, type PinImportPreview,
+  type PinTable, type Revision, type SearchResult } from './api';
 import { componentTabs } from './modules';
 import EngineeringPanel from './EngineeringPanel';
 import './engineering.css';
@@ -82,6 +83,10 @@ function ComponentPage({ id }: { id: number }) {
   const [viewing, setViewing] = useState<Revision | null>(null);
   const [editing, setEditing] = useState(false);
   const [pins, setPins] = useState<PinTable | null>(null);
+  const [pinPreview, setPinPreview] = useState<PinImportPreview | null>(null);
+  const [pinImportBusy, setPinImportBusy] = useState(false);
+  const [replaceConfirmed, setReplaceConfirmed] = useState(false);
+  const [pinImportStatus, setPinImportStatus] = useState('');
   useEffect(() => {
     const controller = new AbortController();
     setError('');
@@ -92,6 +97,7 @@ function ComponentPage({ id }: { id: number }) {
   if (!detail) return <section className="panel"><p role={error ? 'alert' : 'status'}>{error || 'Loading component…'}</p>
     {error && <button onClick={() => setRefresh(n => n + 1)}>Retry</button>}</section>;
   const count = detail.documents.reduce((total, document) => total + document.revisions.length, 0);
+  const currentPinCount = detail.pin_summary.count;
   const transitions: Record<Component['lifecycle_status'], Component['lifecycle_status'][]> = {
     DRAFT: ['VALIDATED'], VALIDATED: ['DRAFT', 'ENGINEER_APPROVED'],
     ENGINEER_APPROVED: ['VALIDATED', 'RELEASED'], RELEASED: ['ENGINEER_APPROVED'],
@@ -117,6 +123,29 @@ function ComponentPage({ id }: { id: number }) {
   async function viewPins() {
     try { setPins(await api<PinTable>(`/components/${id}/pins`)); }
     catch (error) { setError(message(error)); }
+  }
+  async function previewPinFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const data = new FormData(); data.append('file', file);
+    setPinImportBusy(true); setError(''); setPinImportStatus(''); setReplaceConfirmed(false);
+    try { setPinPreview(await api<PinImportPreview>(`/components/${id}/pin-import/preview`, {
+      method: 'POST', body: data,
+    })); } catch (error) { setError(message(error)); setPinPreview(null); }
+    finally { setPinImportBusy(false); event.target.value = ''; }
+  }
+  async function importPins() {
+    if (!pinPreview?.valid || (currentPinCount > 0 && !replaceConfirmed)) return;
+    setPinImportBusy(true); setError('');
+    try {
+      const imported = await api<PinTable>(`/components/${id}/pins`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_type: 'USER_IMPORT', pins: pinPreview.pins }),
+      });
+      setPins(imported); setPinPreview(null); setPinImportStatus('Pin table imported.');
+      setRefresh(n => n + 1);
+    } catch (error) { setError(message(error)); }
+    finally { setPinImportBusy(false); }
   }
   return <article className="panel detail">
     <header className="component-heading"><div><p className="eyebrow">{detail.manufacturer}</p>
@@ -147,15 +176,38 @@ function ComponentPage({ id }: { id: number }) {
         <div><dt>Package</dt><dd>{detail.package || '—'}</dd></div>
         <div><dt>Internal Part Number</dt><dd>{detail.internal_part_number || '—'}</dd></div>
         <div><dt>Lifecycle</dt><dd>{detail.lifecycle_status}</dd></div>
-        <div><dt>Pins</dt><dd>{detail.pin_summary.count} · {detail.pin_summary.source_type || 'No source'}</dd></div>
+        <div><dt>Pins</dt><dd>{currentPinCount} · {detail.pin_summary.source_type || 'No source'}</dd></div>
         <div><dt>Registered</dt><dd>{time(detail.created_at)}</dd></div>
         <div><dt>Documents</dt><dd>{detail.documents.length} documents · {count} revisions</dd></div>
       </dl>
       <div className="overview-action"><h3>Canonical pin table</h3>
-        <p className="muted">{detail.pin_summary.count} pins available for this company part.</p>
-        <button onClick={viewPins}>View Pins</button></div>
+        <p className="muted">{currentPinCount} pins available for this company part.</p>
+        <div className="actions"><button onClick={viewPins}>View Pins</button>
+          <a className="button-link" href="/api/v1/pin-import/template?format=csv">Download CSV Template</a>
+          <a className="button-link" href="/api/v1/pin-import/template?format=xlsx">Download XLSX Template</a>
+          <label className="button-link">Import Pin File<input className="visually-hidden" type="file"
+            accept=".csv,.xlsx" onChange={previewPinFile} disabled={pinImportBusy} /></label></div>
+        {pinImportStatus && <p role="status" className="success">{pinImportStatus}</p>}
+      </div>
       {pins && <div className="table-scroll"><table><thead><tr><th>Pin Number</th><th>Pin Name</th></tr></thead>
         <tbody>{pins.pins.map(pin => <tr key={pin.id}><td>{pin.pin_number}</td><td>{pin.pin_name}</td></tr>)}</tbody></table></div>}
+      {pinPreview && <section className="overview-action" aria-labelledby="pin-preview-title">
+        <h3 id="pin-preview-title">Pin Import Preview</h3>
+        <p><strong>File:</strong> {pinPreview.filename}</p><p><strong>Detected Pins:</strong> {pinPreview.count}</p>
+        <p><strong>Validation:</strong> <span className="badge">{pinPreview.valid ? 'VALID' : 'ERROR'}</span></p>
+        {pinPreview.valid ? <div className="table-scroll"><table><thead><tr><th>Pin Number</th><th>Pin Name</th></tr></thead>
+          <tbody>{pinPreview.pins.map(pin => <tr key={pin.pin_number}><td>{pin.pin_number}</td><td>{pin.pin_name}</td></tr>)}</tbody></table></div>
+          : <div className="table-scroll"><table><thead><tr><th>Row</th><th>Field</th><th>Error</th></tr></thead>
+            <tbody>{pinPreview.errors.map((issue, index) => <tr key={`${issue.code}-${index}`}>
+              <td>{issue.row ?? '—'}</td><td>{issue.field ?? 'File'}</td><td>{issue.message}</td></tr>)}</tbody></table></div>}
+        {pinPreview.valid && currentPinCount > 0 && <label className="replacement-confirm">
+          <input type="checkbox" checked={replaceConfirmed} onChange={event => setReplaceConfirmed(event.target.checked)} />
+          Importing {pinPreview.count} pins will replace the current Pin Table ({currentPinCount} pins).
+        </label>}
+        <div className="actions"><button className="quiet" onClick={() => setPinPreview(null)}>Cancel</button>
+          <button onClick={importPins} disabled={pinImportBusy || !pinPreview.valid ||
+            (currentPinCount > 0 && !replaceConfirmed)}>Import Pins</button></div>
+      </section>}
       <div className="overview-action"><h3>Datasheets & reference documents</h3>
         <p className="muted">Keep original PDFs and their revision history with this component.</p>
         <button onClick={() => setTab('documents')}>Manage documents</button></div>
