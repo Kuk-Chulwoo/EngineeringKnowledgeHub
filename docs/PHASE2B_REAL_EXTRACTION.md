@@ -118,7 +118,7 @@ closed transport vocabulary. The requested scope is copied exactly onto all enti
 variant facts still require PDF evidence. Scope text supplied by the user is not proof.
 
 Every PRESENT claim needs actual text support on a selected physical page of the same
-revision. Matching normalizes whitespace only. Region-only citations and OCR/VISION
+revision. Matching tries whitespace-normalized exact substrings first, then conservative PDF character normalization (see evidence resolver update below). Region-only citations and OCR/VISION
 locators are rejected for this native-text adapter. Presence of a quote proves location,
 not its engineering interpretation; confidence is a self-report, visually separate
 from engineer approval. Unknown values are NOT_FOUND or AMBIGUOUS, never guessed.
@@ -329,3 +329,28 @@ Unknown dynamic exceptions use a generic reason. No exception traceback/chaining
 Authorization headers, API keys, raw provider responses or datasheet text are serialized.
 Model identifiers are taken from frozen run configuration, bounded and filtered.
 Existing DB failure codes, summaries, UI responses, immutable records and retries are unchanged.
+
+
+### Native evidence resolver update
+
+The resolver first retains the original whitespace-normalized contiguous substring check.
+Only if that fails, `canonical_native_text()` normalizes Unicode whitespace, smart quotes,
+common dashes/minus signs, × to x, fullwidth ASCII and Latin ff/fi/fl/ffi/ffl ligatures.
+NFKC is deliberately restricted to those width/ligature characters: blanket NFKC can
+flatten exponents or unit symbols. Neither numbers nor units are converted. Case,
+punctuation and word/token order remain significant. Both sides must still match as a
+contiguous substring within the cited physical page's selected text. No fuzzy matching,
+paraphrase matching, table reconstruction, dehyphenation or cross-page joining is used.
+
+Comparison never rewrites evidence.source_text, its source-text hash, stored PDF bytes,
+selected-text/request/response hashes or historical runs. Unresolved evidence still raises
+the identical ValueError and follows the existing INVALID_OUTPUT and diagnostic contracts.
+Golden evaluation retains its existing, stricter whitespace-only comparison semantics.
+
+The verbatim-copy prompt is strengthened and versioned `focused-native/2`; the existing
+prompt/schema hashing automatically changes the frozen prompt hash. No locator schema or
+database migration is required. Restart backend and worker together. Queued runs frozen
+under the old prompt fail the existing version/hash consistency check; explicitly retry
+as a new run. Historical approvals are not inherited or rewritten. No real CC1120 run
+was performed to verify this change; automated fixtures cover representation differences
+and rejection of changed facts.

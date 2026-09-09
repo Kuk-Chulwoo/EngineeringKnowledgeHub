@@ -14,7 +14,7 @@ from ..engineering.schema import (
     field_type,
     validate_claim,
 )
-from .parsing import normalized
+from .parsing import resolves_native_evidence
 
 
 class WireEvidence(StrictModel):
@@ -124,8 +124,9 @@ def parse_output(payload, pass_name, revision_id, page_count, selected, scope):
                     or evidence.region is not None
                     or not evidence.source_text
                     or evidence.page_number not in selected
-                    or normalized(evidence.source_text)
-                    not in normalized(selected[evidence.page_number])
+                    or not resolves_native_evidence(
+                        evidence.source_text, selected[evidence.page_number]
+                    )
                 ):
                     raise ValueError("Evidence does not resolve to selected native page text")
         entities.append(entity)

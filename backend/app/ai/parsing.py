@@ -2,6 +2,7 @@
 
 import hashlib
 import re
+import unicodedata
 from dataclasses import dataclass
 
 import pypdf
@@ -32,6 +33,58 @@ KEYWORDS = {
 
 def normalized(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
+
+
+# Only encoding/presentation equivalents. Do not remove punctuation, join words,
+# dehyphenate line endings, case-fold, reorder tokens, or normalize units/numbers.
+PDF_CHARACTER_EQUIVALENTS = str.maketrans(
+    {
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201a": "'",
+        "\u201b": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u201e": '"',
+        "\u201f": '"',
+        "\u2010": "-",
+        "\u2011": "-",
+        "\u2012": "-",
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2015": "-",
+        "\u2212": "-",
+        "\u00d7": "x",
+    }
+)
+
+
+def canonical_native_text(text: str) -> str:
+    """Conservative PDF character normalization for comparison only.
+
+    Restrict NFKC to fullwidth ASCII and Latin ff/fi/fl/ffi/ffl ligatures.
+    Blanket NFKC would also flatten exponents, circled numbers and unit symbols,
+    which can change engineering meaning (for example m² versus m2).
+    Unicode spaces are already handled by normalized(); source strings stay intact.
+    """
+    text = "".join(
+        unicodedata.normalize("NFKC", char)
+        if "\uff01" <= char <= "\uff5e" or "\ufb00" <= char <= "\ufb04"
+        else char
+        for char in text
+    )
+    return normalized(text.translate(PDF_CHARACTER_EQUIVALENTS))
+
+
+def resolves_native_evidence(quote: str, selected_page_text: str) -> bool:
+    """Exact whitespace-normalized substring first, canonical substring only on failure."""
+    exact_quote = normalized(quote)
+    if not exact_quote:
+        return False
+    if exact_quote in normalized(selected_page_text):
+        return True
+    canonical_quote = canonical_native_text(quote)
+    return bool(canonical_quote) and canonical_quote in canonical_native_text(selected_page_text)
 
 
 @dataclass
