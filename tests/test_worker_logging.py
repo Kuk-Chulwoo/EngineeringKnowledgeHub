@@ -36,7 +36,10 @@ def events(caplog):
 def test_failed_pass_and_sanitized_validation_details_keep_db_contract(client, caplog, pass_name):
     def mutate(output, current):
         if current == pass_name:
-            output["entities"][0]["fields"][0]["confidence"] = UNSAFE
+            if current == "pins":
+                output["pins"][0]["source_page"] = UNSAFE
+            else:
+                output["entities"][0]["fields"][0]["confidence"] = UNSAFE
 
     run, _ = real.run_real(client, mutate)
     assert run["status"] == "FAILED" and run["error_code"] == "INVALID_OUTPUT"
@@ -46,7 +49,12 @@ def test_failed_pass_and_sanitized_validation_details_keep_db_contract(client, c
     assert log["run_id"] == run["id"] and log["provider"] == "openai"
     assert log["model"] == real.MODEL and log["current_pass"] == pass_name
     assert log["stage"] == "evidence_validation" and log["exception_class"] == "ValidationError"
-    assert "entities.0.fields.0.confidence: float_type" in log["sanitized_error_message"]
+    expected = (
+        "*.0.*: int_type"
+        if pass_name == "pins"
+        else "entities.0.fields.0.confidence: float_type"
+    )
+    assert expected in log["sanitized_error_message"]
     assert "sanitized_error_message" not in run
 
 
@@ -108,7 +116,7 @@ def test_pydantic_extra_keys_inputs_and_context_are_not_logged(caplog):
 def test_known_evidence_error_is_actionable_and_next_run_has_fresh_context(client, caplog):
     def mutate(output, name):
         if name == "pins":
-            output["entities"][0]["fields"][0]["evidence"][0]["source_text"] = SOURCE
+            output["pins"][0]["pin_name"] = SOURCE
 
     failed, _ = real.run_real(client, mutate)
     (first,) = events(caplog)

@@ -128,6 +128,7 @@ def extract(service, run, provider, *, on_progress=None):
         if pass_name == "pins":
             chunk_records = []
             merged = []
+            package_ref = next(entity.local_key for entity in entities if entity.kind == "PACKAGE")
             for chunk_index, chunk in enumerate(pin_chunks(selected)):
                 service.policy.authorize(document.revision_id)
                 current = service.repository.read_run(run["id"])
@@ -199,6 +200,8 @@ def extract(service, run, provider, *, on_progress=None):
                             document.page_count,
                             chunk_selected,
                             settings.package_scope,
+                            package_ref,
+                            str(chunk_index),
                         )
                     )
                 except ValueError:

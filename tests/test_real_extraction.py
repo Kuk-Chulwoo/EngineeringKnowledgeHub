@@ -49,15 +49,29 @@ def pass_payload(revision, pass_name, selected_pages=None):
     data = candidates(revision).model_dump()
     entities = [e for e in data["entities"] if e["kind"] in PASS_KINDS[pass_name]]
     if pass_name == "pins" and selected_pages is not None:
-        entities = [
-            entity
-            for entity in entities
-            if {
-                evidence["page_number"]
-                for claim in entity["fields"]
-                for evidence in claim["evidence"]
-            }.issubset(selected_pages)
-        ]
+        pins = []
+        for entity in entities:
+            claims = {claim["key"]: claim for claim in entity["fields"]}
+            number = claims["number"]
+            name = claims["source_name"]
+            pages = {e["page_number"] for e in number["evidence"]} & {
+                e["page_number"] for e in name["evidence"]
+            }
+            available_pages = sorted(pages & selected_pages)
+            if available_pages:
+                pins.append(
+                    {
+                        "availability": "PRESENT",
+                        "pin_number": str(number["value"]),
+                        "pin_name": name["value"],
+                        "source_page": available_pages[0],
+                    }
+                )
+        return {
+            "schema_version": data["schema_version"],
+            "source_revision_id": revision,
+            "pins": pins,
+        }
     for e in entities:
         e["fields"] = [f for f in e["fields"] if not f["key"].startswith("alternate_function.")]
     for entity in entities:
@@ -83,6 +97,25 @@ def transport(calls, mutation=None):
             name,
             {int(page) for page in content["physical_pages"]},
         )
+        if name == "interfaces":
+            pin_keys = {
+                next(field["value"] for field in entity["fields"] if field["key"] == "number"): entity[
+                    "local_key"
+                ]
+                for entity in content["reference_entities"]
+                if entity["kind"] == "PIN"
+            }
+            source_pin_numbers = {
+                entity["local_key"]: next(
+                    field["value"] for field in entity["fields"] if field["key"] == "number"
+                )
+                for entity in candidates(content["source_revision_id"]).model_dump()["entities"]
+                if entity["kind"] == "PIN"
+            }
+            for entity in output["entities"]:
+                for field in entity["fields"]:
+                    if field["key"] == "pin_ref" and field["value"]:
+                        field["value"] = pin_keys[source_pin_numbers[field["value"]]]
         if mutation:
             mutation(output, name)
         return httpx.Response(
@@ -394,20 +427,13 @@ def test_duplicate_pin_number_across_chunks_is_rejected(client):
         if "Focused pass: pins" not in body["input"][0]["content"]:
             return successful.handle_request(request)
         pin_attempts += 1
-        if pin_attempts == 1:
-            return successful.handle_request(request)
         content = json.loads(body["input"][1]["content"])
-        output = pass_payload(revision, "pins", {1, 2})
-        entity = copy.deepcopy(output["entities"][0])
-        entity["local_key"] = "duplicate_pin_from_later_chunk"
-        page = int(next(iter(content["physical_pages"])))
-        quote = content["physical_pages"][str(page)].splitlines()[0]
-        for claim in entity["fields"]:
-            for evidence in claim["evidence"]:
-                evidence["page_number"] = page
-                evidence["source_text"] = quote
-                evidence["source_text_sha256"] = None
-        output["entities"] = [entity]
+        output = pass_payload(
+            revision, "pins", {int(page) for page in content["physical_pages"]}
+        )
+        if pin_attempts != 1 or not output["pins"]:
+            return successful.handle_request(request)
+        output["pins"].append(copy.deepcopy(output["pins"][0]))
         return httpx.Response(
             200,
             json={

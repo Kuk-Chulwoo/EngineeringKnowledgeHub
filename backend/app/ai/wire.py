@@ -9,9 +9,12 @@ from ..engineering.schema import (
     TEXT,
     Claim,
     Entity,
+    Evidence,
+    PinRecord,
     Quantity,
     StrictModel,
     field_type,
+    is_exposed_pad_identifier,
     validate_claim,
 )
 from ..engineering.validation_errors import prefix_validation, validation_error
@@ -45,6 +48,16 @@ class PassOutput(StrictModel):
     entities: list[WireEntity] = Field(max_length=2000)
 
 
+class MinimalWirePin(PinRecord):
+    source_page: int = Field(gt=0)
+
+
+class MinimalPinsOutput(StrictModel):
+    schema_version: Literal["engineering-extraction/0.1"]
+    source_revision_id: int = Field(gt=0)
+    pins: list[MinimalWirePin] = Field(max_length=2000)
+
+
 PASS_KINDS = {
     "identity": ["COMPONENT_IDENTITY"],
     "package": ["PACKAGE"],
@@ -54,7 +67,9 @@ PASS_KINDS = {
 
 
 def wire_schema(pass_name: str):
-    schema = PassOutput.model_json_schema()
+    schema = (
+        MinimalPinsOutput.model_json_schema() if pass_name == "pins" else PassOutput.model_json_schema()
+    )
 
     def strict(node):
         if isinstance(node, dict):
@@ -69,6 +84,8 @@ def wire_schema(pass_name: str):
                 strict(v)
 
     strict(schema)
+    if pass_name == "pins":
+        return schema
     schema["$defs"]["WireEntity"]["properties"]["kind"] = {
         "type": "string",
         "enum": PASS_KINDS[pass_name],
@@ -86,7 +103,9 @@ def wire_schema(pass_name: str):
     return schema
 
 
-def parse_output(payload, pass_name, revision_id, page_count, selected, scope):
+def parse_output(
+    payload, pass_name, revision_id, page_count, selected, scope, package_ref=None, key_prefix="0"
+):
     def required(node, value, loc=()):
         if "$ref" in node:
             return required(schema["$defs"][node["$ref"].split("/")[-1]], value, loc)
@@ -120,6 +139,100 @@ def parse_output(payload, pass_name, revision_id, page_count, selected, scope):
 
     schema = wire_schema(pass_name)
     required(schema, payload)
+    if pass_name == "pins":
+        output = MinimalPinsOutput.model_validate(payload)
+        if output.source_revision_id != revision_id:
+            raise validation_error(
+                "Provider revision mismatch", ("source_revision_id",), "wrong_revision"
+            )
+        if not package_ref:
+            raise validation_error("Package reference is missing", ("pins",), "invalid_reference")
+        entities = []
+        for index, pin in enumerate(output.pins):
+            loc = ("pins", index)
+            if pin.source_page not in selected:
+                raise validation_error(
+                    "Pin source page is not selected", loc + ("source_page",), "evidence_page_not_selected"
+                )
+            if pin.availability == "PRESENT":
+                for key, value in (("pin_number", pin.pin_number), ("pin_name", pin.pin_name)):
+                    if not resolves_native_evidence(value, selected[pin.source_page]):
+                        raise validation_error(
+                            "Evidence does not resolve to selected native page text",
+                            loc + (key,),
+                            "evidence_quote_unresolved",
+                        )
+            availability = pin.availability
+            number_evidence = (
+                [
+                    Evidence(
+                        source_revision_id=revision_id,
+                        page_number=pin.source_page,
+                        source_text=pin.pin_number,
+                        locator_method="TABLE",
+                        locator_version="native-selection/1",
+                        evidence_role="DIRECT",
+                    )
+                ]
+                if availability == "PRESENT"
+                else []
+            )
+            name_evidence = (
+                [
+                    Evidence(
+                        source_revision_id=revision_id,
+                        page_number=pin.source_page,
+                        source_text=pin.pin_name,
+                        locator_method="TABLE",
+                        locator_version="native-selection/1",
+                        evidence_role="DIRECT",
+                    )
+                ]
+                if availability == "PRESENT"
+                else []
+            )
+            entities.append(
+                Entity(
+                    local_key=f"pin_{key_prefix}_{index}",
+                    kind="PIN",
+                    scope_key=scope,
+                    fields=[
+                        Claim(
+                            key="number",
+                            value=pin.pin_number,
+                            availability=availability,
+                            evidence=number_evidence,
+                        ),
+                        Claim(
+                            key="source_name",
+                            value=pin.pin_name,
+                            availability=availability,
+                            evidence=name_evidence,
+                        ),
+                        Claim(key="primary_function", availability="NOT_FOUND"),
+                        Claim(key="electrical_type", availability="NOT_FOUND"),
+                        Claim(
+                            key="package_ref",
+                            value=package_ref if availability == "PRESENT" else None,
+                            availability=availability,
+                            evidence=number_evidence,
+                            transformation="server-assigned package scope",
+                        ),
+                        Claim(
+                            key="is_exposed_pad",
+                            value=(
+                                is_exposed_pad_identifier(pin.pin_number)
+                                if availability == "PRESENT"
+                                else None
+                            ),
+                            availability=availability,
+                            evidence=number_evidence,
+                            transformation="exact exposed-pad identifier classification",
+                        ),
+                    ],
+                )
+            )
+        return entities
     output = PassOutput.model_validate(payload)
     if output.source_revision_id != revision_id:
         raise validation_error(

@@ -76,6 +76,7 @@ CATEGORIES = {
     "INTERFACE": "Interfaces",
     "INTERFACE_PIN": "Interfaces",
 }
+MINIMAL_PIN_FIELDS = {"number", "source_name"}
 
 
 def flatten(entities):
@@ -116,6 +117,8 @@ def flatten(entities):
     for e in entities:
         a = address(e)
         for f in e.fields:
+            if e.kind == "PIN" and f.key not in MINIMAL_PIN_FIELDS:
+                continue
             key = canonical([a, f.key])
             require(key not in result, "Ambiguous semantic entity address; comparison refused", 422)
             value = f.value
@@ -175,7 +178,15 @@ def compare(expected, actual):
                         and ge["source_revision_id"] == ae["source_revision_id"]
                         and ge["source_text"]
                         and ae["source_text"]
-                        and normalized(ge["source_text"]) in normalized(ae["source_text"])
+                        and (
+                            normalized(ge["source_text"]) in normalized(ae["source_text"])
+                            or (
+                                (g or a)["category"] == "Pins"
+                                and (g or a)["field"] in MINIMAL_PIN_FIELDS
+                                and normalized(ae["source_text"])
+                                in normalized(ge["source_text"])
+                            )
+                        )
                         for ae in a["evidence"]
                     )
                     for ge in g["evidence"]

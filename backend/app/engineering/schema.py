@@ -119,6 +119,34 @@ class Entity(StrictModel):
     fields: list[Claim] = Field(min_length=1, max_length=100)
 
 
+class PinRecord(StrictModel):
+    """Minimal pin identity shared by AI extraction and future tabular import."""
+
+    availability: Literal["PRESENT", "NOT_FOUND", "AMBIGUOUS"]
+    pin_number: str | None = Field(default=None, max_length=100)
+    pin_name: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def available(self) -> "PinRecord":
+        if self.availability == "PRESENT":
+            if not self.pin_number or not self.pin_number.strip():
+                raise ValueError("pin_number requires nonempty text")
+            if not self.pin_name or not self.pin_name.strip():
+                raise ValueError("pin_name requires nonempty text")
+        elif self.pin_number is not None or self.pin_name is not None:
+            raise ValueError("Unavailable pins must not contain invented values")
+        return self
+
+
+def is_exposed_pad_identifier(pin_number: str | None) -> bool:
+    return bool(pin_number) and pin_number.strip().casefold() in {
+        "ep",
+        "epad",
+        "pad",
+        "exposed pad",
+    }
+
+
 class Provenance(StrictModel):
     pipeline_version: str = Field(min_length=1, max_length=100)
     parser_version: str = Field(min_length=1, max_length=100)
