@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from ..ai.providers.base import ProviderFailure
 from ..services import ServiceError
+from .validation_errors import ValidationDetail
 
 logger = logging.getLogger("ekh.worker")
 
@@ -121,21 +122,93 @@ SAFE_TYPES = frozenset(
 )
 
 
+STRUCTURAL_TYPES = SAFE_TYPES | frozenset(
+    {
+        "evidence_missing",
+        "evidence_wrong_revision",
+        "evidence_page_out_of_range",
+        "evidence_page_not_selected",
+        "evidence_quote_unresolved",
+        "evidence_locator_unsupported",
+        "invalid_text",
+        "invalid_enum",
+        "invalid_count",
+        "invalid_boolean",
+        "wrong_revision",
+        "duplicate_entity",
+        "identity_count",
+        "package_missing",
+        "duplicate_claim",
+        "invalid_reference",
+        "scope_mismatch",
+        "dimension_order",
+        "membership_scope_mismatch",
+        "duplicate_membership",
+        "duplicate_pin",
+        "exposed_pad_mismatch",
+        "pin_count_mismatch",
+        "wrong_pass_or_scope",
+        "unknown_field",
+    }
+)
+
+
+def safe_loc(loc):
+    return [
+        part
+        if type(part) is int and 0 <= part <= 20000
+        else part
+        if type(part) is str and part in SAFE_LOCATIONS
+        else "*"
+        for part in loc[:12]
+    ]
+
+
+def validation_metadata(error: Exception) -> dict:
+    prefix = getattr(error, "validation_prefix", ())
+    if isinstance(error, ValidationError):
+        # Only loc/type cross the logging boundary; msg/input/ctx/url are never copied.
+        details = [
+            {
+                "loc": safe_loc(prefix + tuple(item["loc"])),
+                "type": item["type"] if item["type"] in SAFE_TYPES else "validation_error",
+            }
+            for item in error.errors(include_input=False, include_context=False, include_url=False)[
+                :8
+            ]
+        ]
+        count = error.error_count()
+    else:
+        detail = getattr(error, "validation_detail", None)
+        if not isinstance(detail, ValidationDetail):
+            # Publication wrappers preserve the cause without ever logging its message/trace.
+            if isinstance(error, ServiceError) and isinstance(error.__cause__, ValueError):
+                return validation_metadata(error.__cause__)
+            return {}
+        details = [
+            {
+                "loc": safe_loc(detail.loc),
+                "type": detail.type if detail.type in STRUCTURAL_TYPES else "validation_error",
+            }
+        ]
+        count = 1
+    if not details:
+        return {}
+    return {
+        "field_path": ".".join(map(str, details[0]["loc"])) or "root",
+        "validation_type": details[0]["type"],
+        "error_count": count,
+        "validation_errors": details,
+    }
+
+
 def sanitized_message(error: Exception) -> str:
     if isinstance(error, ValidationError):
-        # Pydantic str(error), msg, input and ctx can all contain the entire PDF/provider payload.
-        diagnostics = []
-        for item in error.errors(include_input=False, include_context=False, include_url=False)[:8]:
-            location = ".".join(
-                str(part)
-                if type(part) is int and 0 <= part <= 20000
-                else part
-                if type(part) is str and part in SAFE_LOCATIONS
-                else "*"
-                for part in item["loc"][:12]
-            )
-            kind = item["type"] if item["type"] in SAFE_TYPES else "validation_error"
-            diagnostics.append(f"{location or 'root'}: {kind}")
+        metadata = validation_metadata(error)
+        diagnostics = [
+            f"{'.'.join(map(str, item['loc'])) or 'root'}: {item['type']}"
+            for item in metadata.get("validation_errors", [])
+        ]
         return f"Schema validation failed ({error.error_count()} errors): " + "; ".join(diagnostics)
     if isinstance(error, ProviderFailure):
         return PROVIDER_MESSAGES.get(error.code, "Provider request failed; detail withheld")
@@ -191,5 +264,7 @@ class RunDiagnostics:
             "stage": self.stage,
             "exception_class": identifier(type(error).__name__, secret),
             "sanitized_error_message": sanitized_message(error),
+            "pass_name": self.current_pass,
+            **validation_metadata(error),
         }
         logger.error(json.dumps(event, ensure_ascii=True), exc_info=False, stack_info=False)

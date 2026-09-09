@@ -354,3 +354,26 @@ under the old prompt fail the existing version/hash consistency check; explicitl
 as a new run. Historical approvals are not inherited or rewritten. No real CC1120 run
 was performed to verify this change; automated fixtures cover representation differences
 and rejection of changed facts.
+
+
+### Issue #1: structural validation diagnostics
+
+Worker events now add `field_path`, `validation_type`, `pass_name`, `error_count`,
+and a bounded `validation_errors` list containing **only `{loc, type}`**. Locations
+use array indices and allowlisted schema-property names, never model-generated entity
+keys, component/pin names, candidate values or quoted text. For example,
+`entities.0.fields.3.value` with `invalid_enum` identifies the failing package-pass field.
+Unknown path segments are masked with `*`; at most eight errors and twelve segments
+per path are emitted. Pydantic message/input/context/URL fields never enter the event.
+
+Evidence reasons distinguish `evidence_missing`, `evidence_wrong_revision`,
+`evidence_page_out_of_range`, `evidence_page_not_selected` and
+`evidence_quote_unresolved`. Earlier Pydantic shape/type failures retain their Pydantic
+loc/type, such as `string_too_short` or `literal_error`. Candidate rules also identify
+invalid enums/counts/references and whole-dataset consistency failures. Context follows
+existing publication ServiceError causes without logging their message or traceback.
+
+Existing DB/UI failure code mapping remains unchanged. The
+empty-evidence check reports a structural missing-evidence ValueError for a PRESENT claim
+already rejected by the existing Claim validator. This adds no acceptance path,
+fuzzy matching, partial publication, schema migration or persisted diagnostic content.

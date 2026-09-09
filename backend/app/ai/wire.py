@@ -14,6 +14,7 @@ from ..engineering.schema import (
     field_type,
     validate_claim,
 )
+from ..engineering.validation_errors import prefix_validation, validation_error
 from .parsing import resolves_native_evidence
 
 
@@ -86,48 +87,83 @@ def wire_schema(pass_name: str):
 
 
 def parse_output(payload, pass_name, revision_id, page_count, selected, scope):
-    def required(node, value):
+    def required(node, value, loc=()):
         if "$ref" in node:
-            return required(schema["$defs"][node["$ref"].split("/")[-1]], value)
+            return required(schema["$defs"][node["$ref"].split("/")[-1]], value, loc)
         if node.get("type") == "object" and isinstance(value, dict):
             if set(value) != set(node["properties"]):
-                raise ValueError("Provider object has missing or unknown schema properties")
+                missing = sorted(set(node["properties"]) - set(value))
+                extra = sorted(set(value) - set(node["properties"]))
+                key = missing[0] if missing else extra[0]
+                raise validation_error(
+                    "Provider object has missing or unknown schema properties",
+                    loc + (key,),
+                    "missing" if missing else "extra_forbidden",
+                )
+            if (
+                "availability" in node["properties"]
+                and value.get("availability") == "PRESENT"
+                and value.get("evidence") == []
+            ):
+                raise validation_error(
+                    "Present values require evidence", loc + ("evidence",), "evidence_missing"
+                )
             for key, item in value.items():
-                required(node["properties"][key], item)
+                required(node["properties"][key], item, loc + (key,))
         if node.get("type") == "array" and isinstance(value, list):
-            for item in value:
-                required(node["items"], item)
+            for index, item in enumerate(value):
+                required(node["items"], item, loc + (index,))
         if isinstance(value, dict):
             for variant in node.get("anyOf", []):
                 if "$ref" in variant or variant.get("type") == "object":
-                    required(variant, value)
+                    required(variant, value, loc)
 
     schema = wire_schema(pass_name)
     required(schema, payload)
     output = PassOutput.model_validate(payload)
     if output.source_revision_id != revision_id:
-        raise ValueError("Provider revision mismatch")
+        raise validation_error(
+            "Provider revision mismatch", ("source_revision_id",), "wrong_revision"
+        )
     allowed = wire_schema(pass_name)["$defs"]["WireClaim"]["properties"]["key"]["enum"]
     entities = []
-    for wire in output.entities:
+    for entity_index, wire in enumerate(output.entities):
+        entity_loc = ("entities", entity_index)
         if wire.kind not in PASS_KINDS[pass_name] or wire.scope_key != scope:
-            raise ValueError("Wrong pass kind or package scope")
-        entity = Entity.model_validate(wire.model_dump())
-        for claim in entity.fields:
+            raise validation_error(
+                "Wrong pass kind or package scope", entity_loc, "wrong_pass_or_scope"
+            )
+        try:
+            entity = Entity.model_validate(wire.model_dump())
+        except ValueError as error:
+            raise prefix_validation(error, entity_loc)
+        for field_index, claim in enumerate(entity.fields):
+            field_loc = entity_loc + ("fields", field_index)
             if claim.key not in allowed:
-                raise ValueError("Unknown field key")
-            field_type(entity.kind, claim.key)
-            validate_claim(entity.kind, claim, revision_id, page_count)
-            for evidence in claim.evidence:
-                if (
-                    evidence.locator_method not in ("TEXT", "TABLE")
-                    or evidence.region is not None
-                    or not evidence.source_text
-                    or evidence.page_number not in selected
-                    or not resolves_native_evidence(
-                        evidence.source_text, selected[evidence.page_number]
+                raise validation_error("Unknown field key", field_loc + ("key",), "unknown_field")
+            try:
+                field_type(entity.kind, claim.key)
+                validate_claim(entity.kind, claim, revision_id, page_count)
+            except ValueError as error:
+                raise prefix_validation(error, field_loc)
+            for evidence_index, evidence in enumerate(claim.evidence):
+                evidence_loc = field_loc + ("evidence", evidence_index)
+                message = "Evidence does not resolve to selected native page text"
+                if evidence.locator_method not in ("TEXT", "TABLE") or evidence.region is not None:
+                    raise validation_error(message, evidence_loc, "evidence_locator_unsupported")
+                if not evidence.source_text:
+                    raise validation_error(
+                        message, evidence_loc + ("source_text",), "evidence_missing"
                     )
+                if evidence.page_number not in selected:
+                    raise validation_error(
+                        message, evidence_loc + ("page_number",), "evidence_page_not_selected"
+                    )
+                if not resolves_native_evidence(
+                    evidence.source_text, selected[evidence.page_number]
                 ):
-                    raise ValueError("Evidence does not resolve to selected native page text")
+                    raise validation_error(
+                        message, evidence_loc + ("source_text",), "evidence_quote_unresolved"
+                    )
         entities.append(entity)
     return entities

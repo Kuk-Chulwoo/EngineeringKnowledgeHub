@@ -9,6 +9,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .validation_errors import prefix_validation, validation_error
+
 SCHEMA_VERSION = "engineering-extraction/0.1"
 
 
@@ -232,32 +234,47 @@ def field_type(kind: str, key: str) -> str:
         kind == "INTERFACE_PIN" and key in ("pin_ref", "interface_ref")
     ):
         return "reference"
-    raise ValueError(f"Unsupported field {kind}.{key}")
+    raise validation_error(f"Unsupported field {kind}.{key}", ("key",), "unknown_field")
 
 
 def validate_claim(kind: str, claim: Claim, revision_id: int, page_count: int) -> None:
     value_type = field_type(kind, claim.key)
-    for evidence in claim.evidence:
+    for evidence_index, evidence in enumerate(claim.evidence):
         if evidence.source_revision_id != revision_id:
-            raise ValueError("Evidence belongs to another revision")
+            raise validation_error(
+                "Evidence belongs to another revision",
+                ("evidence", evidence_index, "source_revision_id"),
+                "evidence_wrong_revision",
+            )
         if evidence.page_number > page_count:
-            raise ValueError("Evidence page outside original PDF")
+            raise validation_error(
+                "Evidence page outside original PDF",
+                ("evidence", evidence_index, "page_number"),
+                "evidence_page_out_of_range",
+            )
     if claim.availability != "PRESENT":
         return
     value = claim.value
     if value_type in ("text", "reference", "enum"):
         if type(value) is not str or not value.strip() or len(value) > 2000:
-            raise ValueError(f"{claim.key} requires nonempty text")
+            raise validation_error(
+                f"{claim.key} requires nonempty text", ("value",), "invalid_text"
+            )
         if value_type == "enum" and value not in ENUMS[claim.key]:
-            raise ValueError(f"Unsupported {claim.key} value")
+            raise validation_error(f"Unsupported {claim.key} value", ("value",), "invalid_enum")
     elif value_type == "count":
         if type(value) is not int or not 1 <= value <= 2000:
-            raise ValueError("lead_count requires positive integer")
+            raise validation_error(
+                "lead_count requires positive integer", ("value",), "invalid_count"
+            )
     elif value_type == "bool":
         if type(value) is not bool:
-            raise ValueError(f"{claim.key} requires a boolean")
+            raise validation_error(f"{claim.key} requires a boolean", ("value",), "invalid_boolean")
     else:
-        Quantity.model_validate(value)
+        try:
+            Quantity.model_validate(value)
+        except ValueError as error:
+            raise prefix_validation(error, ("value",))
 
 
 def values(entity: Entity) -> dict[str, Any]:
@@ -266,32 +283,51 @@ def values(entity: Entity) -> dict[str, Any]:
 
 def validate_candidates(data: CandidateSet, revision_id: int, page_count: int) -> list[str]:
     if data.source_revision_id != revision_id:
-        raise ValueError("Candidate source revision mismatch")
+        raise validation_error(
+            "Candidate source revision mismatch", ("source_revision_id",), "wrong_revision"
+        )
     entities = {entity.local_key: entity for entity in data.entities}
     if len(entities) != len(data.entities):
-        raise ValueError("Duplicate entity keys")
+        raise validation_error("Duplicate entity keys", ("entities",), "duplicate_entity")
     if sum(e.kind == "COMPONENT_IDENTITY" for e in data.entities) != 1:
-        raise ValueError("Exactly one component identity required")
+        raise validation_error(
+            "Exactly one component identity required", ("entities",), "identity_count"
+        )
     packages = [e for e in data.entities if e.kind == "PACKAGE"]
     if not packages:
-        raise ValueError("Package coverage is missing")
+        raise validation_error("Package coverage is missing", ("entities",), "package_missing")
     warnings: list[str] = []
-    for entity in data.entities:
+    for entity_index, entity in enumerate(data.entities):
+        entity_loc = ("entities", entity_index)
         keys = [claim.key for claim in entity.fields]
         if len(keys) != len(set(keys)):
-            raise ValueError("Duplicate claims")
+            raise validation_error("Duplicate claims", entity_loc + ("fields",), "duplicate_claim")
         if REQUIRED[entity.kind] - set(keys):
-            raise ValueError(f"Missing required claim slots for {entity.local_key}")
-        for claim in entity.fields:
-            validate_claim(entity.kind, claim, revision_id, page_count)
+            raise validation_error(
+                f"Missing required claim slots for {entity.local_key}",
+                entity_loc + ("fields",),
+                "missing",
+            )
+        for field_index, claim in enumerate(entity.fields):
+            field_loc = entity_loc + ("fields", field_index)
+            try:
+                validate_claim(entity.kind, claim, revision_id, page_count)
+            except ValueError as error:
+                raise prefix_validation(error, field_loc)
             if claim.availability != "PRESENT":
                 warnings.append(f"{entity.local_key}.{claim.key}: {claim.availability}")
             elif field_type(entity.kind, claim.key) == "reference":
                 target = entities.get(claim.value)
                 if target is None or target.kind != REFS[claim.key]:
-                    raise ValueError("Reference target missing or wrong kind")
+                    raise validation_error(
+                        "Reference target missing or wrong kind",
+                        field_loc + ("value",),
+                        "invalid_reference",
+                    )
                 if target.scope_key != entity.scope_key:
-                    raise ValueError("Package scope mismatch")
+                    raise validation_error(
+                        "Package scope mismatch", field_loc + ("value",), "scope_mismatch"
+                    )
         v = values(entity)
         if entity.kind == "PACKAGE":
             for name in ("body_length", "body_width", "body_height", "pitch"):
@@ -301,14 +337,23 @@ def validate_candidates(data: CandidateSet, revision_id: int, page_count: int) -
                     if f"{name}.{bound}" in v
                 ]
                 if bounds != sorted(bounds):
-                    raise ValueError("Dimension minimum <= nominal <= maximum violated")
+                    raise validation_error(
+                        "Dimension minimum <= nominal <= maximum violated",
+                        entity_loc + ("fields",),
+                        "dimension_order",
+                    )
         if entity.kind == "INTERFACE_PIN" and "pin_ref" in v and "interface_ref" in v:
             pin = values(entities[v["pin_ref"]])
             interface = values(entities[v["interface_ref"]])
             if pin.get("package_ref") != interface.get("package_ref"):
-                raise ValueError("Interface membership crosses packages")
+                raise validation_error(
+                    "Interface membership crosses packages",
+                    entity_loc + ("fields",),
+                    "membership_scope_mismatch",
+                )
     membership: set[tuple[str, str, str, str]] = set()
-    for entity in data.entities:
+    for entity_index, entity in enumerate(data.entities):
+        entity_loc = ("entities", entity_index)
         if entity.kind == "INTERFACE_PIN":
             v = values(entity)
             pair = (
@@ -318,7 +363,9 @@ def validate_candidates(data: CandidateSet, revision_id: int, page_count: int) -
                 v.get("mode", ""),
             )
             if pair in membership:
-                raise ValueError("Duplicate interface membership")
+                raise validation_error(
+                    "Duplicate interface membership", entity_loc, "duplicate_membership"
+                )
             membership.add(pair)
     for package in packages:
         pv = values(package)
@@ -329,18 +376,22 @@ def validate_candidates(data: CandidateSet, revision_id: int, page_count: int) -
         ]
         designators = [p["number"].strip().casefold() for p in pins if "number" in p]
         if len(designators) != len(set(designators)):
-            raise ValueError("Duplicate pin designators")
+            raise validation_error("Duplicate pin designators", ("entities",), "duplicate_pin")
         if any("number" not in p or "is_exposed_pad" not in p for p in pins):
             warnings.append(f"{package.local_key}: incomplete pin identities")
             continue
         exposed = [p for p in pins if p.get("is_exposed_pad")]
         if "exposed_pad_present" in pv and pv["exposed_pad_present"] != bool(exposed):
-            raise ValueError("Exposed pad presence and pin table disagree")
+            raise validation_error(
+                "Exposed pad presence and pin table disagree", ("entities",), "exposed_pad_mismatch"
+            )
         basis = pv.get("pin_count_basis")
         if basis == "UNSPECIFIED" or "lead_count" not in pv:
             warnings.append(f"{package.local_key}: pin count basis/count unresolved")
         else:
             count = len(pins) - len(exposed) if basis == "LEADS_ONLY" else len(pins)
             if count != pv["lead_count"]:
-                raise ValueError("Pin count mismatch: missing or extra pins")
+                raise validation_error(
+                    "Pin count mismatch: missing or extra pins", ("entities",), "pin_count_mismatch"
+                )
     return warnings
