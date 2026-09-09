@@ -311,3 +311,21 @@ approval inheritance, provenance persistence, policy disable/deny/cancel, parser
 scanned PDF rejection, golden approval/hash pinning, comparison classifications,
 correction-independent measurement, semantic ID matching, populated v2 audit migration,
 and ignored credentials/runtime data. No real API credits or CC1120 facts were used.
+
+
+### Worker console diagnostics
+
+Failed `work_once()` runs emit a single JSON error event to the worker console (stderr).
+Fields: `event`, `run_id`, frozen `provider`/`model`, `current_pass`, `stage`,
+`exception_class`, and `sanitized_error_message`. Before/after a focused pass,
+`current_pass` is null; synthetic runs use `synthetic`. Stages distinguish policy,
+preprocessing, page selection, provider request, pass audit, evidence validation,
+candidate assembly/validation and publication. Progress context is local to the invocation;
+it is never persisted or reused by another run.
+
+Only exact application-owned diagnostic messages are emitted. Pydantic failures report
+bounded allowlisted field paths and error types, never input, message context or values.
+Unknown dynamic exceptions use a generic reason. No exception traceback/chaining,
+Authorization headers, API keys, raw provider responses or datasheet text are serialized.
+Model identifiers are taken from frozen run configuration, bounded and filtered.
+Existing DB failure codes, summaries, UI responses, immutable records and retries are unchanged.

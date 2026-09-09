@@ -1,6 +1,7 @@
 """Local worker; external calls require an explicitly authorized queued run and policy."""
 
 import argparse
+import logging
 import time
 
 from ..ai.config import ProviderPolicy
@@ -17,6 +18,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true", help="Process at most one queued run")
     args = parser.parse_args()
+    logging.basicConfig(level=logging.WARNING, format="%(message)s")
     settings = Settings.from_env()
     database = Database(settings.database_path)
     database.initialize()

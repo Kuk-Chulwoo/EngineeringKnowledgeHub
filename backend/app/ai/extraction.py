@@ -20,7 +20,12 @@ def provenance(model, settings):
     ).model_dump()
 
 
-def extract(service, run, provider):
+def extract(service, run, provider, *, on_progress=None):
+    def progress(stage, current_pass=None):
+        if on_progress is not None:
+            on_progress(stage, current_pass)
+
+    progress("preprocessing")
     frozen = service.repository.read_run(run["id"])["provenance"]
     settings = ExtractionSettings.model_validate(frozen["extraction_settings"])
     require(
@@ -34,6 +39,7 @@ def extract(service, run, provider):
     )
     entities = []
     for pass_name in PASS_KINDS:
+        progress("page_selection", pass_name)
         service.policy.authorize(document.revision_id)
         current = service.repository.read_run(run["id"])
         require(current["status"] == "RUNNING", "Run cancelled")
@@ -73,6 +79,7 @@ def extract(service, run, provider):
             "selected_text_sha256": digest({str(k): v for k, v in selected.items()}),
             "truncated_pages": document.truncated_pages,
         }
+        progress("provider_request", pass_name)
         try:
             result = provider.generate(
                 frozen["model_identifier"],
@@ -101,7 +108,9 @@ def extract(service, run, provider):
             model_version=result.model_version,
         )
         # Persist metadata even if subsequent local candidate validation fails; never raw responses.
+        progress("pass_audit", pass_name)
         service.repository.record_pass(run["id"], run["lease_token"], record)
+        progress("evidence_validation", pass_name)
         entities.extend(
             parse_output(
                 result.payload,
@@ -112,6 +121,7 @@ def extract(service, run, provider):
                 settings.package_scope,
             )
         )
+    progress("candidate_assembly")
     return CandidateSet(
         source_revision_id=document.revision_id,
         entities=entities,

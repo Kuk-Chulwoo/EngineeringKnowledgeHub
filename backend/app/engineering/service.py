@@ -9,6 +9,7 @@ from ..ai.parsing import analyze
 from ..ai.providers.base import ProviderFailure
 from ..ai.providers.openai_provider import OpenAIProvider
 from ..services import HubService, ServiceError
+from .diagnostics import RunDiagnostics
 from .repository import EngineeringRepository, require
 from .schema import CandidateSet
 from .synthetic import PROVENANCE, candidates, fixture_pdf
@@ -75,20 +76,27 @@ class EngineeringService:
         run = self.repository.claim_next(lease_seconds=600)
         if run is None:
             return False
+        diagnostics = RunDiagnostics()
         try:
             if run["provider"] != "synthetic":
                 self.policy.authorize(run["source_revision_id"])
-                data = extract(self, run, self.providers[run["provider"]]())
+                data = extract(
+                    self, run, self.providers[run["provider"]](), on_progress=diagnostics.progress
+                )
+                diagnostics.progress("publication")
                 self.repository.publish(run["id"], run["lease_token"], data)
                 return True
+            diagnostics.progress("source_verification", "synthetic")
             source_hash, pages = self.verify_source(run["source_revision_id"], synthetic=True)
             require(
                 source_hash == run["source_sha256"] and pages == run["page_count"],
                 "Run/source mismatch",
             )
-            data = CandidateSet.model_validate(
-                (provider or SyntheticProvider()).extract(run["source_revision_id"])
-            )
+            diagnostics.progress("provider_request", "synthetic")
+            output = (provider or SyntheticProvider()).extract(run["source_revision_id"])
+            diagnostics.progress("candidate_validation", "synthetic")
+            data = CandidateSet.model_validate(output)
+            diagnostics.progress("publication", "synthetic")
             self.repository.publish(run["id"], run["lease_token"], data)
         except Exception as error:  # noqa: BLE001 - durable worker boundary, redact provider failures
             code = "INVALID_OUTPUT" if isinstance(error, ValueError) else "SOURCE_OR_WORKER_ERROR"
@@ -97,4 +105,5 @@ class EngineeringService:
             if isinstance(error, ProviderFailure):
                 code = error.code
             self.repository.fail(run["id"], run["lease_token"], code)
+            diagnostics.failure(run, error, self.policy.api_key)
         return True
