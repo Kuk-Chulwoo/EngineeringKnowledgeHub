@@ -45,9 +45,19 @@ def no_external_network(monkeypatch):
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", fail)
 
 
-def pass_payload(revision, pass_name):
+def pass_payload(revision, pass_name, selected_pages=None):
     data = candidates(revision).model_dump()
     entities = [e for e in data["entities"] if e["kind"] in PASS_KINDS[pass_name]]
+    if pass_name == "pins" and selected_pages is not None:
+        entities = [
+            entity
+            for entity in entities
+            if {
+                evidence["page_number"]
+                for claim in entity["fields"]
+                for evidence in claim["evidence"]
+            }.issubset(selected_pages)
+        ]
     for e in entities:
         e["fields"] = [f for f in e["fields"] if not f["key"].startswith("alternate_function.")]
     for entity in entities:
@@ -68,7 +78,11 @@ def transport(calls, mutation=None):
         content = json.loads(payload["input"][1]["content"])
         name = next(p for p in PASS_KINDS if "Focused pass: " + p in payload["input"][0]["content"])
         calls.append((request, payload))
-        output = pass_payload(content["source_revision_id"], name)
+        output = pass_payload(
+            content["source_revision_id"],
+            name,
+            {int(page) for page in content["physical_pages"]},
+        )
         if mutation:
             mutation(output, name)
         return httpx.Response(
@@ -122,19 +136,29 @@ def run_real(client, mutation=None):
     return result, calls
 
 
-def test_four_pass_provider_provenance_and_review_survive_restart(client):
+def test_multi_chunk_pins_provenance_and_review_survive_restart(client):
     run, calls = run_real(client)
     assert run["status"] == "SUCCEEDED", run
-    assert len(calls) == 4
+    assert len(calls) == 5
     assert not run["synthetic"] and not run["pads_eligible"]
     assert all(f["review_status"] == "AI_EXTRACTED" for f in fields(run))
     p = run["provenance"]
     assert p["model_identifier"] == MODEL and len(p["prompt_sha256"]) == 64
     assert p["extraction_settings"]["package_scope"] == SCOPE
     assert len(p["passes"]) == 4
-    for record, (request, body) in zip(p["passes"], calls, strict=True):
+    for record in p["passes"]:
         assert record["model_version"] == MODEL + "-version-1"
         assert len(record["request_sha256"]) == len(record["response_sha256"]) == 64
+    chunks = p["passes"][2]["pin_chunks"]
+    assert [
+        (chunk["selected_pages"], chunk["page_start"], chunk["page_end"])
+        for chunk in chunks
+    ] == [([1, 2], 1, 2), ([3], 3, 3)]
+    assert all(
+        len(chunk["request_sha256"]) == len(chunk["response_sha256"]) == 64
+        for chunk in chunks
+    )
+    for request, body in calls:
         assert body["text"]["format"]["strict"] is True and body["store"] is False
         assert request.url == "https://api.openai.com/v1/responses"
         assert "tools" not in body and "file" not in body
@@ -249,7 +273,7 @@ def test_provider_failures_are_redacted_and_retry_is_explicit(client, mode, code
     retry = start(client, revision, run["id"])
     service.work_once()
     assert service.repository.read_run(retry["id"])["status"] == "SUCCEEDED"
-    assert len(calls) == 4
+    assert len(calls) == 5
 
 
 def test_provider_read_timeout_is_180_seconds():
@@ -273,7 +297,7 @@ def test_focused_pass_retries_once_after_timeout_then_succeeds(client):
     service.work_once()
     completed = service.repository.read_run(run["id"])
     assert completed["status"] == "SUCCEEDED"
-    assert len(attempts) == 5 and len(successful_calls) == 4
+    assert len(attempts) == 6 and len(successful_calls) == 5
 
 
 def test_validation_failure_is_not_retried(client):
@@ -303,6 +327,131 @@ def test_cancellation_after_timeout_prevents_retry(client):
     service.work_once()
     assert service.repository.read_run(run["id"])["status"] == "CANCELLED"
     assert len(calls) == 1
+
+
+def test_pin_chunk_timeout_retries_only_that_chunk(client):
+    service, successful_calls = configure(client)
+    revision = source(client)
+    successful = transport(successful_calls)
+    pin_attempts = 0
+
+    def flaky_pin_chunk(request):
+        nonlocal pin_attempts
+        body = json.loads(request.content)
+        if "Focused pass: pins" in body["input"][0]["content"]:
+            pin_attempts += 1
+            if pin_attempts == 1:
+                raise httpx.ReadTimeout("withheld", request=request)
+        return successful.handle_request(request)
+
+    service.providers["openai"] = lambda: OpenAIProvider(
+        "fake", httpx.MockTransport(flaky_pin_chunk)
+    )
+    run = start(client, revision)
+    service.work_once()
+    assert service.repository.read_run(run["id"])["status"] == "SUCCEEDED"
+    assert pin_attempts == 3 and len(successful_calls) == 5
+
+
+def test_incomplete_pin_chunk_fails_safely_with_chunk_provenance(client):
+    service, successful_calls = configure(client)
+    revision = source(client)
+    successful = transport(successful_calls)
+    pin_attempts = 0
+
+    def incomplete_second_chunk(request):
+        nonlocal pin_attempts
+        body = json.loads(request.content)
+        if "Focused pass: pins" in body["input"][0]["content"]:
+            pin_attempts += 1
+            if pin_attempts == 2:
+                return httpx.Response(200, json={"status": "incomplete", "detail": "withheld"})
+        return successful.handle_request(request)
+
+    service.providers["openai"] = lambda: OpenAIProvider(
+        "fake", httpx.MockTransport(incomplete_second_chunk)
+    )
+    run = start(client, revision)
+    service.work_once()
+    failed = service.repository.read_run(run["id"])
+    assert failed["status"] == "FAILED" and failed["error_code"] == "PROVIDER_INCOMPLETE"
+    pins = failed["provenance"]["passes"][2]
+    assert len(pins["pin_chunks"]) == 2
+    assert pins["pin_chunks"][0]["error_code"] is None
+    assert pins["pin_chunks"][1]["error_code"] == "PROVIDER_INCOMPLETE"
+    assert "withheld" not in canonical(failed)
+
+
+def test_duplicate_pin_number_across_chunks_is_rejected(client):
+    service, successful_calls = configure(client)
+    revision = source(client)
+    successful = transport(successful_calls)
+    pin_attempts = 0
+
+    def duplicate_second_chunk(request):
+        nonlocal pin_attempts
+        body = json.loads(request.content)
+        if "Focused pass: pins" not in body["input"][0]["content"]:
+            return successful.handle_request(request)
+        pin_attempts += 1
+        if pin_attempts == 1:
+            return successful.handle_request(request)
+        content = json.loads(body["input"][1]["content"])
+        output = pass_payload(revision, "pins", {1, 2})
+        entity = copy.deepcopy(output["entities"][0])
+        entity["local_key"] = "duplicate_pin_from_later_chunk"
+        page = int(next(iter(content["physical_pages"])))
+        quote = content["physical_pages"][str(page)].splitlines()[0]
+        for claim in entity["fields"]:
+            for evidence in claim["evidence"]:
+                evidence["page_number"] = page
+                evidence["source_text"] = quote
+                evidence["source_text_sha256"] = None
+        output["entities"] = [entity]
+        return httpx.Response(
+            200,
+            json={
+                "status": "completed",
+                "model": MODEL + "-version-1",
+                "output": [
+                    {"type": "message", "content": [{"type": "output_text", "text": canonical(output)}]}
+                ],
+            },
+        )
+
+    service.providers["openai"] = lambda: OpenAIProvider(
+        "fake", httpx.MockTransport(duplicate_second_chunk)
+    )
+    run = start(client, revision)
+    service.work_once()
+    failed = service.repository.read_run(run["id"])
+    assert failed["status"] == "FAILED"
+    assert failed["error_code"] == "PUBLICATION_OR_SOURCE_REJECTED"
+
+
+def test_cancellation_between_pin_chunks_stops_later_requests(client):
+    service, successful_calls = configure(client)
+    revision = source(client)
+    run = start(client, revision)
+    successful = transport(successful_calls)
+    pin_calls = 0
+
+    def cancel_after_first_pin_chunk(request):
+        nonlocal pin_calls
+        body = json.loads(request.content)
+        response = successful.handle_request(request)
+        if "Focused pass: pins" in body["input"][0]["content"]:
+            pin_calls += 1
+            if pin_calls == 1:
+                service.repository.cancel(run["id"])
+        return response
+
+    service.providers["openai"] = lambda: OpenAIProvider(
+        "fake", httpx.MockTransport(cancel_after_first_pin_chunk)
+    )
+    service.work_once()
+    assert service.repository.read_run(run["id"])["status"] == "CANCELLED"
+    assert pin_calls == 1 and len(successful_calls) == 3
 
 
 def test_policy_default_disabled_consent_required_and_worker_kill_switch(client):

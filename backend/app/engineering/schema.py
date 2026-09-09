@@ -129,6 +129,18 @@ class Provenance(StrictModel):
     synthetic: Literal[True] = True
 
 
+class PinChunkProvenance(StrictModel):
+    chunk_index: int = Field(ge=0)
+    page_start: int = Field(gt=0)
+    page_end: int = Field(gt=0)
+    selected_pages: list[int] = Field(min_length=1)
+    selected_text_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    response_sha256: str | None = Field(pattern=r"^[0-9a-f]{64}$")
+    model_version: str | None = Field(max_length=200)
+    error_code: str | None = Field(default=None, max_length=100)
+
+
 class PassProvenance(StrictModel):
     pass_name: Literal["identity", "package", "pins", "interfaces"]
     prompt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -139,6 +151,7 @@ class PassProvenance(StrictModel):
     selected_pages: list[int]
     selected_text_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     truncated_pages: list[int]
+    pin_chunks: list[PinChunkProvenance] = Field(default_factory=list, max_length=100)
 
 
 class RealProvenance(StrictModel):
