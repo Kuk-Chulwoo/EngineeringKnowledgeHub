@@ -8,6 +8,8 @@ import httpx
 from ...engineering.schema import canonical, digest
 from .base import ProviderFailure, ProviderResult
 
+READ_TIMEOUT_SECONDS = 180
+
 
 class OpenAIProvider:
     def __init__(self, api_key: str, transport=None):
@@ -43,7 +45,7 @@ class OpenAIProvider:
         try:
             with (
                 httpx.Client(
-                    timeout=httpx.Timeout(90, connect=10),
+                    timeout=httpx.Timeout(READ_TIMEOUT_SECONDS, connect=10),
                     transport=self._transport,
                     follow_redirects=False,
                     trust_env=False,

@@ -16,7 +16,7 @@ from test_migration import populated_v1
 from backend.app.ai.config import ExtractionSettings, ProviderPolicy
 from backend.app.ai.golden import compare
 from backend.app.ai.parsing import DocumentText, analyze
-from backend.app.ai.providers.openai_provider import OpenAIProvider
+from backend.app.ai.providers.openai_provider import READ_TIMEOUT_SECONDS, OpenAIProvider
 from backend.app.ai.wire import PASS_KINDS, wire_schema
 from backend.app.database import Database
 from backend.app.engineering.repository import EngineeringRepository
@@ -239,7 +239,8 @@ def test_provider_failures_are_redacted_and_retry_is_explicit(client, mode, code
     service.work_once()
     failed = service.repository.read_run(run["id"])
     assert failed["status"] == "FAILED" and failed["error_code"] == code
-    assert "sensitive" not in canonical(failed) and len(calls) == 1
+    assert "sensitive" not in canonical(failed)
+    assert len(calls) == (2 if mode == "timeout" else 1)
     assert failed["provenance"]["passes"][0]["error_code"] == code
     assert len(failed["provenance"]["passes"][0]["request_sha256"]) == 64
     if mode in ("timeout", "http", "huge"):
@@ -249,6 +250,59 @@ def test_provider_failures_are_redacted_and_retry_is_explicit(client, mode, code
     service.work_once()
     assert service.repository.read_run(retry["id"])["status"] == "SUCCEEDED"
     assert len(calls) == 4
+
+
+def test_provider_read_timeout_is_180_seconds():
+    assert READ_TIMEOUT_SECONDS == 180
+
+
+def test_focused_pass_retries_once_after_timeout_then_succeeds(client):
+    service, successful_calls = configure(client)
+    revision = source(client)
+    attempts = []
+    successful = transport(successful_calls)
+
+    def flaky(request):
+        attempts.append(request)
+        if len(attempts) == 1:
+            raise httpx.ReadTimeout("withheld", request=request)
+        return successful.handle_request(request)
+
+    service.providers["openai"] = lambda: OpenAIProvider("fake", httpx.MockTransport(flaky))
+    run = start(client, revision)
+    service.work_once()
+    completed = service.repository.read_run(run["id"])
+    assert completed["status"] == "SUCCEEDED"
+    assert len(attempts) == 5 and len(successful_calls) == 4
+
+
+def test_validation_failure_is_not_retried(client):
+    def invalid(output, name):
+        if name == "identity":
+            output["entities"][0]["fields"][0]["evidence"] = []
+
+    run, calls = run_real(client, invalid)
+    assert run["status"] == "FAILED" and run["error_code"] == "INVALID_OUTPUT"
+    assert len(calls) == 1
+
+
+def test_cancellation_after_timeout_prevents_retry(client):
+    service, _ = configure(client)
+    revision = source(client)
+    run = start(client, revision)
+    calls = []
+
+    def cancel_then_timeout(request):
+        calls.append(request)
+        service.repository.cancel(run["id"])
+        raise httpx.ReadTimeout("withheld", request=request)
+
+    service.providers["openai"] = lambda: OpenAIProvider(
+        "fake", httpx.MockTransport(cancel_then_timeout)
+    )
+    service.work_once()
+    assert service.repository.read_run(run["id"])["status"] == "CANCELLED"
+    assert len(calls) == 1
 
 
 def test_policy_default_disabled_consent_required_and_worker_kill_switch(client):

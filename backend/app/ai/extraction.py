@@ -80,28 +80,36 @@ def extract(service, run, provider, *, on_progress=None):
             "truncated_pages": document.truncated_pages,
         }
         progress("provider_request", pass_name)
-        try:
-            result = provider.generate(
-                frozen["model_identifier"],
-                prompt(pass_name),
-                content,
-                wire_schema(pass_name),
-                settings.max_output_tokens,
-            )
-        except ProviderFailure as error:
-            if error.request_sha256:
-                service.repository.record_pass(
-                    run["id"],
-                    run["lease_token"],
-                    {
-                        **record,
-                        "request_sha256": error.request_sha256,
-                        "response_sha256": error.response_sha256,
-                        "model_version": None,
-                        "error_code": error.code,
-                    },
+        timeout_retried = False
+        while True:
+            try:
+                result = provider.generate(
+                    frozen["model_identifier"],
+                    prompt(pass_name),
+                    content,
+                    wire_schema(pass_name),
+                    settings.max_output_tokens,
                 )
-            raise
+                break
+            except ProviderFailure as error:
+                if error.code == "PROVIDER_TIMEOUT" and not timeout_retried:
+                    current = service.repository.read_run(run["id"])
+                    require(current["status"] == "RUNNING", "Run cancelled")
+                    timeout_retried = True
+                    continue
+                if error.request_sha256:
+                    service.repository.record_pass(
+                        run["id"],
+                        run["lease_token"],
+                        {
+                            **record,
+                            "request_sha256": error.request_sha256,
+                            "response_sha256": error.response_sha256,
+                            "model_version": None,
+                            "error_code": error.code,
+                        },
+                    )
+                raise
         record.update(
             request_sha256=result.request_sha256,
             response_sha256=result.response_sha256,
