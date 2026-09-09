@@ -28,6 +28,51 @@ The portable option downloads a pinned official Node runtime into ignored .tools
 and checks its SHA-256 against the official manifest. Omit -PortableNode if Node
 is installed. Python dependencies and Node dependencies are locked.
 
+### Start all local services
+
+One-time setup from the project root (do not overwrite an existing `.env.local`):
+
+```powershell
+copy .env.example .env.local
+```
+
+Edit `.env.local` in your editor. For Real AI, set `EKH_EXTERNAL_AI_ENABLED=true`,
+your `EKH_OPENAI_MODEL`, and your actual `OPENAI_API_KEY`. The example has Real AI
+disabled and empty model/key values. Never paste credentials into console commands,
+logs or Git. `.env.local` is already excluded by `.gitignore`.
+
+Daily startup:
+
+```powershell
+.\scripts\start-all.ps1
+```
+
+If execution policy blocks the script, use
+`powershell -ExecutionPolicy Bypass -File scripts\start-all.ps1`.
+The launcher moves to the project root, loads `.env.local` into its current process,
+and opens separate Backend, Frontend and Worker PowerShell windows using the existing
+individual start scripts. Settings reach child processes through environment inheritance,
+never command-line arguments or console dumps. Only allowlisted settings in `.env.example`
+are accepted. File values override inherited values; empty values clear an inherited setting.
+Use literal `NAME=value` lines, optional matching single/double quotes and full-line `#`
+comments. No variable expansion, command execution, multiline values or inline comments.
+Malformed/unknown/duplicate settings stop startup before any child is launched; errors
+show a line number without echoing the setting or value.
+
+Without `.env.local`, startup uses existing shell settings and application defaults;
+Backend/Frontend and offline synthetic extraction remain available. Real AI configuration
+guidance is printed without requesting secrets. Existing shell variables remain effective.
+Changing the file requires restarting the services. Starting a worker processes already
+queued runs, including explicitly authorized real runs when external AI is enabled.
+
+Stop with **Ctrl+C in each service window**, then close the windows. `stop-all.ps1` is
+intentionally omitted: the existing scripts spawn descendant Python/npm/Node processes,
+and process names, ports or saved PIDs cannot safely establish ownership across PID reuse
+and restarts. The launcher does not terminate any process. Stop old instances before
+running it again to avoid occupied ports or duplicate workers.
+
+### Individual startup (unchanged)
+
 Start these in two PowerShell terminals:
 
 ```powershell
@@ -61,7 +106,8 @@ Dates are optional. Upload timestamps are stored in UTC and displayed locally.
 
 ## Configuration and storage
 
-See .env.example. The application reads shell environment variables, not .env files:
+See .env.example. `start-all.ps1` loads root `.env.local`; the application and individual
+start scripts still read shell environment variables and do not load env files themselves:
 
 ```powershell
 $env:EKH_DATABASE_PATH = 'data/hub.sqlite3'
