@@ -65,11 +65,21 @@ guidance is printed without requesting secrets. Existing shell variables remain 
 Changing the file requires restarting the services. Starting a worker processes already
 queued runs, including explicitly authorized real runs when external AI is enabled.
 
-Stop with **Ctrl+C in each service window**, then close the windows. `stop-all.ps1` is
-intentionally omitted: the existing scripts spawn descendant Python/npm/Node processes,
-and process names, ports or saved PIDs cannot safely establish ownership across PID reuse
-and restarts. The launcher does not terminate any process. Stop old instances before
-running it again to avoid occupied ports or duplicate workers.
+Open the application at http://127.0.0.1:5173. A second `start-all.ps1` invocation is
+refused while its owned service set is running. The launcher records only process ownership
+data under the gitignored `.run/` directory; configuration values and secrets are never
+stored there.
+
+Stop all three services from the project root:
+
+```powershell
+.\scripts\stop-all.ps1
+```
+
+Shutdown verifies each service shell by PID, process creation identity, executable and
+launcher identity before stopping its current descendant tree. A stale manifest with no
+live processes is retired on the next start. If a PID was reused or any identity cannot be
+verified, the launcher refuses to stop that process and preserves the state for inspection.
 
 ### Individual startup (unchanged)
 

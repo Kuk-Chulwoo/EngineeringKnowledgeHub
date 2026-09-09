@@ -7,6 +7,7 @@ venv/
 node_modules/
 dist/
 .tools/
+.run/
 .env
 .env.*
 !.env.example

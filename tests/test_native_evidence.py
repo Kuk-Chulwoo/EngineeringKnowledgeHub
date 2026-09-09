@@ -116,7 +116,7 @@ def test_prompt_version_and_hash_require_explicit_new_run(client, monkeypatch):
     service, calls = real.configure(client)
     revision = real.source(client)
     new_hash = prompts.prompt_hash()
-    assert prompts.PROMPT_VERSION == "focused-native/2"
+    assert prompts.PROMPT_VERSION == "focused-native/3"
     added = (
         "Copy a contiguous quote exactly as it appears in supplied native page text;\n"
         "do not reconstruct table rows or paraphrase. Preserve numbers, units and punctuation.\n"
@@ -132,7 +132,7 @@ def test_prompt_version_and_hash_require_explicit_new_run(client, monkeypatch):
     assert failed["status"] == "FAILED" and failed["error_code"] == "PUBLICATION_OR_SOURCE_REJECTED"
     assert failed["provenance"] == old["provenance"] and not calls
     retry = real.start(client, revision, old["id"])
-    assert retry["provenance"]["prompt_version"] == "focused-native/2"
+    assert retry["provenance"]["prompt_version"] == "focused-native/3"
     assert retry["provenance"]["prompt_sha256"] == new_hash
     service.work_once()
     assert service.repository.read_run(retry["id"])["status"] == "SUCCEEDED"
